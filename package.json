@@ -8,6 +8,7 @@
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "dotenv": "^17.0.0",
     "express": "^5.1.0",
     "mongodb": "^6.17.0",
