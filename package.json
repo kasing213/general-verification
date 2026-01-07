@@ -1,0 +1,26 @@
+{
+  "name": "ocr-verification-service",
+  "version": "1.0.0",
+  "description": "OCR-based payment verification microservice using GPT-4o Vision",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "mongodb": "^6.17.0",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^5.8.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}

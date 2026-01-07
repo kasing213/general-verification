@@ -1,0 +1,290 @@
+'use strict';
+
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
+const apiKeyAuth = require('../middleware/auth');
+const { verifyPayment } = require('../core/verification');
+const { invoices, payments, fraudAlerts } = require('../db/mongo');
+const config = require('../config/schema');
+
+const router = express.Router();
+
+// Ensure upload directories exist
+const uploadDirs = ['./uploads', './uploads/verified', './uploads/pending', './uploads/rejected'];
+for (const dir of uploadDirs) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, './uploads');
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: config.upload.maxFileSize
+  },
+  fileFilter: (req, file, cb) => {
+    if (config.upload.allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Allowed: ${config.upload.allowedMimeTypes.join(', ')}`));
+    }
+  }
+});
+
+/**
+ * POST /api/v1/verify
+ * Verify payment screenshot
+ *
+ * Two modes:
+ * - Mode A: Inline parameters (expectedPayment in body)
+ * - Mode B: Invoice lookup (invoice_id in body)
+ */
+router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
+  try {
+    // Validate image upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing image',
+        message: 'Image file is required. Use "image" field in multipart/form-data.'
+      });
+    }
+
+    const imagePath = req.file.path;
+    let expectedPayment = null;
+    let invoiceId = null;
+    let customerId = null;
+
+    // Parse request body
+    const invoiceIdParam = req.body.invoice_id || req.body.invoiceId;
+    let expectedPaymentParam = req.body.expectedPayment || req.body.expected_payment;
+
+    // Parse expectedPayment if it's a string (from form-data)
+    if (typeof expectedPaymentParam === 'string') {
+      try {
+        expectedPaymentParam = JSON.parse(expectedPaymentParam);
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid expectedPayment',
+          message: 'expectedPayment must be valid JSON'
+        });
+      }
+    }
+
+    // Mode B: Invoice lookup
+    if (invoiceIdParam) {
+      invoiceId = invoiceIdParam;
+      const invoice = await invoices.findById(invoiceId);
+
+      if (!invoice) {
+        // Clean up uploaded file
+        fs.unlinkSync(imagePath);
+        return res.status(404).json({
+          success: false,
+          error: 'Invoice not found',
+          message: `Invoice ${invoiceId} does not exist`
+        });
+      }
+
+      customerId = invoice.customer_id;
+
+      // Use invoice's expectedPayment, but allow override from request
+      expectedPayment = {
+        amount: expectedPaymentParam?.amount ?? invoice.expectedPayment?.amount,
+        currency: expectedPaymentParam?.currency ?? invoice.expectedPayment?.currency ?? 'KHR',
+        bank: expectedPaymentParam?.bank ?? invoice.expectedPayment?.bank ?? null,
+        toAccount: expectedPaymentParam?.toAccount ?? invoice.expectedPayment?.toAccount ?? null,
+        recipientNames: expectedPaymentParam?.recipientNames ?? invoice.expectedPayment?.recipientNames ?? null,
+        tolerancePercent: expectedPaymentParam?.tolerancePercent ?? invoice.expectedPayment?.tolerancePercent ?? 5
+      };
+    }
+    // Mode A: Inline parameters
+    else if (expectedPaymentParam) {
+      expectedPayment = {
+        amount: expectedPaymentParam.amount,
+        currency: expectedPaymentParam.currency || 'KHR',
+        bank: expectedPaymentParam.bank || null,
+        toAccount: expectedPaymentParam.toAccount || null,
+        recipientNames: expectedPaymentParam.recipientNames || null,
+        tolerancePercent: expectedPaymentParam.tolerancePercent || 5
+      };
+      customerId = req.body.customerId || req.body.customer_id || null;
+    }
+    // No parameters - basic verification only
+    else {
+      expectedPayment = {
+        amount: null,
+        currency: 'KHR',
+        bank: null,
+        toAccount: null,
+        recipientNames: null,
+        tolerancePercent: 5
+      };
+    }
+
+    // Validate required amount if provided
+    if (expectedPayment.amount !== null && expectedPayment.amount !== undefined) {
+      if (typeof expectedPayment.amount !== 'number' || expectedPayment.amount <= 0) {
+        fs.unlinkSync(imagePath);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid amount',
+          message: 'expectedPayment.amount must be a positive number'
+        });
+      }
+    }
+
+    // Run verification pipeline
+    const result = await verifyPayment(imagePath, expectedPayment, {
+      invoiceId,
+      customerId
+    });
+
+    // Move screenshot to appropriate folder
+    const targetDir = `./uploads/${result.verification.status}`;
+    const targetPath = path.join(targetDir, path.basename(imagePath));
+    fs.renameSync(imagePath, targetPath);
+    result.screenshotPath = targetPath;
+
+    // Save payment record to database
+    const paymentRecord = {
+      _id: result.recordId,
+      invoice_id: invoiceId,
+      customer_id: customerId,
+
+      // OCR data
+      amount: result.payment.amount,
+      currency: result.payment.currency,
+      transactionId: result.payment.transactionId,
+      transactionDate: result.payment.transactionDate,
+      fromAccount: result.payment.fromAccount,
+      toAccount: result.payment.toAccount,
+      recipientName: result.payment.recipientName,
+      bankName: result.payment.bankName,
+      referenceNumber: result.payment.referenceNumber,
+      remark: result.payment.remark,
+      isBankStatement: result.payment.isBankStatement,
+
+      // Verification
+      verificationStatus: result.verification.status,
+      paymentLabel: result.verification.paymentLabel,
+      confidence: result.verification.confidence,
+      rejectionReason: result.verification.rejectionReason,
+
+      // Expected values
+      expectedAmount: expectedPayment.amount,
+      expectedCurrency: expectedPayment.currency,
+      expectedAccount: expectedPayment.toAccount,
+      expectedNames: expectedPayment.recipientNames,
+
+      // Validation results
+      amountMatch: result.validation.amount.match,
+      recipientMatch: result.validation.toAccount.match || result.validation.recipientNames.match,
+
+      // Metadata
+      screenshotPath: targetPath,
+      uploadedAt: new Date(),
+      processedAt: new Date()
+    };
+
+    await payments.create(paymentRecord);
+
+    // Save fraud alert if detected
+    if (result.fraud) {
+      result.fraud.paymentId = result.recordId;
+      await fraudAlerts.create(result.fraud);
+    }
+
+    // Update invoice status if verified
+    if (invoiceId && result.verification.status === 'verified') {
+      await invoices.update(invoiceId, {
+        status: 'verified',
+        verified_at: new Date(),
+        payment_id: result.recordId
+      });
+    }
+
+    // Return result
+    res.json(result);
+
+  } catch (error) {
+    console.error('Verification error:', error);
+
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Verification failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/verify/:id
+ * Get verification result by ID
+ */
+router.get('/:id', apiKeyAuth, async (req, res) => {
+  try {
+    const payment = await payments.findById(req.params.id);
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found',
+        message: `Payment record ${req.params.id} not found`
+      });
+    }
+
+    res.json({
+      success: true,
+      recordId: payment._id,
+      invoiceId: payment.invoice_id,
+      verification: {
+        status: payment.verificationStatus,
+        paymentLabel: payment.paymentLabel,
+        confidence: payment.confidence,
+        rejectionReason: payment.rejectionReason
+      },
+      payment: {
+        amount: payment.amount,
+        currency: payment.currency,
+        transactionId: payment.transactionId,
+        transactionDate: payment.transactionDate,
+        fromAccount: payment.fromAccount,
+        toAccount: payment.toAccount,
+        recipientName: payment.recipientName,
+        bankName: payment.bankName
+      },
+      uploadedAt: payment.uploadedAt
+    });
+
+  } catch (error) {
+    console.error('Error fetching payment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+      message: error.message
+    });
+  }
+});
+
+module.exports = router;
