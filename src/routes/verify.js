@@ -2,37 +2,17 @@
 
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const apiKeyAuth = require('../middleware/auth');
 const { verifyPayment } = require('../core/verification');
-const { invoices, payments, fraudAlerts } = require('../db/mongo');
+const { invoices, payments, fraudAlerts, screenshots } = require('../db/mongo');
 const config = require('../config/schema');
 
 const router = express.Router();
 
-// Ensure upload directories exist
-const uploadDirs = ['./uploads', './uploads/verified', './uploads/pending', './uploads/rejected'];
-for (const dir of uploadDirs) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, './uploads');
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${uuidv4()}${ext}`);
-  }
-});
-
+// Configure multer for memory storage (for GridFS upload)
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: config.upload.maxFileSize
   },
@@ -64,7 +44,8 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       });
     }
 
-    const imagePath = req.file.path;
+    const imageBuffer = req.file.buffer;
+    const filename = `${uuidv4()}.jpg`;
     let expectedPayment = null;
     let invoiceId = null;
     let customerId = null;
@@ -92,8 +73,6 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       const invoice = await invoices.findById(invoiceId);
 
       if (!invoice) {
-        // Clean up uploaded file
-        fs.unlinkSync(imagePath);
         return res.status(404).json({
           success: false,
           error: 'Invoice not found',
@@ -140,7 +119,6 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
     // Validate required amount if provided
     if (expectedPayment.amount !== null && expectedPayment.amount !== undefined) {
       if (typeof expectedPayment.amount !== 'number' || expectedPayment.amount <= 0) {
-        fs.unlinkSync(imagePath);
         return res.status(400).json({
           success: false,
           error: 'Invalid amount',
@@ -149,17 +127,22 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       }
     }
 
-    // Run verification pipeline
-    const result = await verifyPayment(imagePath, expectedPayment, {
+    // Run verification pipeline (pass buffer directly)
+    const result = await verifyPayment(imageBuffer, expectedPayment, {
       invoiceId,
       customerId
     });
 
-    // Move screenshot to appropriate folder
-    const targetDir = `./uploads/${result.verification.status}`;
-    const targetPath = path.join(targetDir, path.basename(imagePath));
-    fs.renameSync(imagePath, targetPath);
-    result.screenshotPath = targetPath;
+    // Upload screenshot to GridFS
+    const screenshotId = await screenshots.upload(imageBuffer, filename, {
+      paymentId: result.recordId,
+      invoiceId,
+      customerId,
+      verificationStatus: result.verification.status,
+      transactionId: result.payment.transactionId || null
+    });
+
+    result.screenshotId = screenshotId;
 
     // Save payment record to database
     const paymentRecord = {
@@ -196,8 +179,10 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       amountMatch: result.validation.amount.match,
       recipientMatch: result.validation.toAccount.match || result.validation.recipientNames.match,
 
+      // GridFS reference
+      screenshotId: screenshotId,
+
       // Metadata
-      screenshotPath: targetPath,
       uploadedAt: new Date(),
       processedAt: new Date()
     };
@@ -207,6 +192,7 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
     // Save fraud alert if detected
     if (result.fraud) {
       result.fraud.paymentId = result.recordId;
+      result.fraud.screenshotId = screenshotId;
       await fraudAlerts.create(result.fraud);
     }
 
@@ -224,11 +210,6 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
 
   } catch (error) {
     console.error('Verification error:', error);
-
-    // Clean up file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
 
     res.status(500).json({
       success: false,
@@ -258,6 +239,7 @@ router.get('/:id', apiKeyAuth, async (req, res) => {
       success: true,
       recordId: payment._id,
       invoiceId: payment.invoice_id,
+      screenshotId: payment.screenshotId,
       verification: {
         status: payment.verificationStatus,
         paymentLabel: payment.paymentLabel,
@@ -279,6 +261,38 @@ router.get('/:id', apiKeyAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching payment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/verify/:id/image
+ * Get screenshot image by payment ID
+ */
+router.get('/:id/image', apiKeyAuth, async (req, res) => {
+  try {
+    const payment = await payments.findById(req.params.id);
+
+    if (!payment || !payment.screenshotId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found',
+        message: 'Screenshot not found'
+      });
+    }
+
+    const imageBuffer = await screenshots.download(payment.screenshotId);
+
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Content-Disposition', `inline; filename="${req.params.id}.jpg"`);
+    res.send(imageBuffer);
+
+  } catch (error) {
+    console.error('Error fetching screenshot:', error);
     res.status(500).json({
       success: false,
       error: 'Server error',

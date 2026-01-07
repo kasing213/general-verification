@@ -1,6 +1,6 @@
 'use strict';
 
-const { MongoClient } = require('mongodb');
+const { MongoClient, GridFSBucket } = require('mongodb');
 
 // MongoDB connection
 const MONGO_URL = process.env.MONGO_URL;
@@ -13,6 +13,9 @@ let db = null;
 let invoicesCollection = null;
 let paymentsCollection = null;
 let fraudAlertsCollection = null;
+
+// GridFS bucket for image storage
+let screenshotsBucket = null;
 
 /**
  * Connect to MongoDB
@@ -39,6 +42,10 @@ async function connect() {
   invoicesCollection = db.collection('invoices');
   paymentsCollection = db.collection('payments');
   fraudAlertsCollection = db.collection('fraudAlerts');
+
+  // Initialize GridFS bucket for screenshots
+  screenshotsBucket = new GridFSBucket(db, { bucketName: 'screenshots' });
+  console.log('GridFS bucket initialized: screenshots');
 
   // Create indexes
   await createIndexes();
@@ -208,6 +215,96 @@ const fraudAlerts = {
   }
 };
 
+// GridFS operations for screenshots
+const screenshots = {
+  /**
+   * Upload image to GridFS
+   * @param {Buffer} buffer - Image buffer
+   * @param {string} filename - Filename
+   * @param {object} metadata - Additional metadata
+   * @returns {Promise<string>} - GridFS file ID
+   */
+  async upload(buffer, filename, metadata = {}) {
+    return new Promise((resolve, reject) => {
+      const uploadStream = screenshotsBucket.openUploadStream(filename, {
+        metadata: {
+          ...metadata,
+          uploadedAt: new Date(),
+          contentType: 'image/jpeg'
+        }
+      });
+
+      uploadStream.on('finish', () => {
+        console.log(`GridFS: Uploaded ${filename} (${uploadStream.id})`);
+        resolve(uploadStream.id.toString());
+      });
+
+      uploadStream.on('error', reject);
+      uploadStream.end(buffer);
+    });
+  },
+
+  /**
+   * Download image from GridFS
+   * @param {string} fileId - GridFS file ID
+   * @returns {Promise<Buffer>} - Image buffer
+   */
+  async download(fileId) {
+    return new Promise((resolve, reject) => {
+      const { ObjectId } = require('mongodb');
+      const chunks = [];
+      const downloadStream = screenshotsBucket.openDownloadStream(new ObjectId(fileId));
+
+      downloadStream.on('data', chunk => chunks.push(chunk));
+      downloadStream.on('end', () => resolve(Buffer.concat(chunks)));
+      downloadStream.on('error', reject);
+    });
+  },
+
+  /**
+   * Get file info from GridFS
+   * @param {string} fileId - GridFS file ID
+   * @returns {Promise<object>} - File metadata
+   */
+  async getInfo(fileId) {
+    const { ObjectId } = require('mongodb');
+    const files = await db.collection('screenshots.files').findOne({ _id: new ObjectId(fileId) });
+    return files;
+  },
+
+  /**
+   * Delete file from GridFS
+   * @param {string} fileId - GridFS file ID
+   */
+  async delete(fileId) {
+    const { ObjectId } = require('mongodb');
+    await screenshotsBucket.delete(new ObjectId(fileId));
+    console.log(`GridFS: Deleted ${fileId}`);
+  },
+
+  /**
+   * List files by metadata
+   * @param {object} filter - Metadata filter
+   * @returns {Promise<array>} - List of files
+   */
+  async list(filter = {}, options = {}) {
+    const { limit = 100, skip = 0 } = options;
+    const query = {};
+
+    // Convert filter to metadata query
+    for (const [key, value] of Object.entries(filter)) {
+      query[`metadata.${key}`] = value;
+    }
+
+    return db.collection('screenshots.files')
+      .find(query)
+      .sort({ uploadDate: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+  }
+};
+
 module.exports = {
   connect,
   disconnect,
@@ -215,5 +312,6 @@ module.exports = {
   getCollections,
   invoices,
   payments,
-  fraudAlerts
+  fraudAlerts,
+  screenshots
 };
