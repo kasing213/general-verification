@@ -240,6 +240,18 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       });
     }
 
+    // Build verification warnings for skipped checks
+    const verification_warnings = [];
+    if (result.validation.toAccount.skipped) {
+      verification_warnings.push("Expected Account not set - account verification skipped");
+    }
+    if (result.validation.recipientNames.skipped) {
+      verification_warnings.push("Recipient Name not set - recipient verification skipped");
+    }
+    if (result.validation.amount.skipped) {
+      verification_warnings.push("Expected Amount not set - amount verification skipped");
+    }
+
     // Transform response to match main backend expected format
     const response = {
       success: result.success,
@@ -278,7 +290,8 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
           recipient_name: result.validation.recipientNames.match,
           date: !result.validation.isOldScreenshot
         },
-        date_warning: result.validation.dateValidation?.reason || null
+        date_warning: result.validation.dateValidation?.reason || null,
+        warnings: verification_warnings.length > 0 ? verification_warnings : null
       },
       // Keep original fields for backward compatibility
       recordId: result.recordId,
