@@ -153,7 +153,8 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       // OCR data
       amount: result.payment.amount,
       currency: result.payment.currency,
-      transactionId: result.payment.transactionId,
+      // Only include transactionId if it exists (sparse index requires field to be absent, not null)
+      ...(result.payment.transactionId && { transactionId: result.payment.transactionId }),
       transactionDate: result.payment.transactionDate,
       fromAccount: result.payment.fromAccount,
       toAccount: result.payment.toAccount,
