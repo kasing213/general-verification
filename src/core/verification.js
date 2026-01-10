@@ -203,6 +203,13 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   result.validation.recipientNames.match = recipientCheck.verified;
   result.validation.recipientNames.skipped = recipientCheck.skipped;
 
+  // Log recipient verification result
+  if (recipientCheck.skipped) {
+    console.log(`Stage 3a: Recipient check SKIPPED | Record ${recordId} | ${recipientCheck.reason}`);
+  } else if (recipientCheck.verified) {
+    console.log(`Stage 3a: Recipient MATCHED | Record ${recordId} | ${recipientCheck.reason}`);
+  }
+
   if (!recipientCheck.skipped && recipientCheck.verified === false) {
     result.verification.status = 'rejected';
     result.verification.rejectionReason = 'WRONG_RECIPIENT';
