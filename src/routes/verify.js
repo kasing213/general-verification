@@ -31,6 +31,19 @@ function formatDate(isoDate) {
   return dateStr.split('T')[0];
 }
 
+// Normalize recipientName (string) and recipientNames (array) to array format
+function normalizeRecipientNames(params) {
+  if (!params) return null;
+  // Accept both recipientName (string) and recipientNames (array)
+  if (params.recipientNames) {
+    return Array.isArray(params.recipientNames) ? params.recipientNames : [params.recipientNames];
+  }
+  if (params.recipientName) {
+    return [params.recipientName];
+  }
+  return null;
+}
+
 // Configure multer for memory storage (for GridFS upload)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -109,7 +122,7 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
         currency: expectedPaymentParam?.currency ?? invoice.expectedPayment?.currency ?? 'KHR',
         bank: expectedPaymentParam?.bank ?? invoice.expectedPayment?.bank ?? null,
         toAccount: expectedPaymentParam?.toAccount ?? invoice.expectedPayment?.toAccount ?? null,
-        recipientNames: expectedPaymentParam?.recipientNames ?? invoice.expectedPayment?.recipientNames ?? null,
+        recipientNames: normalizeRecipientNames(expectedPaymentParam) ?? invoice.expectedPayment?.recipientNames ?? null,
         tolerancePercent: expectedPaymentParam?.tolerancePercent ?? invoice.expectedPayment?.tolerancePercent ?? 5
       };
     }
@@ -120,7 +133,7 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
         currency: expectedPaymentParam.currency || 'KHR',
         bank: expectedPaymentParam.bank || null,
         toAccount: expectedPaymentParam.toAccount || null,
-        recipientNames: expectedPaymentParam.recipientNames || null,
+        recipientNames: normalizeRecipientNames(expectedPaymentParam),
         tolerancePercent: expectedPaymentParam.tolerancePercent || 5
       };
       customerId = req.body.customerId || req.body.customer_id || null;
