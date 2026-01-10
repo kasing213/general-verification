@@ -10,6 +10,27 @@ const config = require('../config/schema');
 
 const router = express.Router();
 
+// Helper functions for response transformation
+function confidenceToNumber(confidence) {
+  const map = { high: 0.9, medium: 0.7, low: 0.5 };
+  return map[confidence] || 0.5;
+}
+
+function formatAmount(amount, currency) {
+  if (!amount) return "N/A";
+  if (currency === 'KHR') {
+    return amount.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(isoDate) {
+  if (!isoDate) return "N/A";
+  // Handle both Date objects and ISO strings
+  const dateStr = isoDate instanceof Date ? isoDate.toISOString() : String(isoDate);
+  return dateStr.split('T')[0];
+}
+
 // Configure multer for memory storage (for GridFS upload)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -206,8 +227,56 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       });
     }
 
-    // Return result
-    res.json(result);
+    // Transform response to match main backend expected format
+    const response = {
+      success: result.success,
+      record_id: result.recordId,
+      confidence: confidenceToNumber(result.verification.confidence),
+      extracted_data: {
+        amount: formatAmount(result.payment.amount, result.payment.currency),
+        currency: result.payment.currency || "",
+        date: formatDate(result.payment.transactionDate),
+        reference: result.payment.referenceNumber || result.payment.transactionId || "N/A",
+        account: result.payment.toAccount || "N/A",
+        bank: result.payment.bankName || "N/A",
+        recipient_name: result.payment.recipientName || "N/A"
+      },
+      verification: {
+        status: result.verification.status,
+        message: result.verification.status === 'verified'
+          ? 'Payment verified successfully'
+          : result.verification.rejectionReason || 'Manual review required',
+        rejectionReason: result.verification.rejectionReason,
+        // Expected values from invoice (for comparison display)
+        expected: {
+          amount: result.validation.amount.expected,
+          currency: expectedPayment.currency || 'KHR',
+          account: result.validation.toAccount.expected || "N/A",
+          recipient_name: Array.isArray(result.validation.recipientNames.expected)
+            ? result.validation.recipientNames.expected[0]
+            : result.validation.recipientNames.expected || "N/A",
+          due_date: expectedPayment.dueDate || null
+        },
+        // Match results
+        matched: {
+          amount: result.validation.amount.match,
+          currency: true,
+          account: result.validation.toAccount.match,
+          recipient_name: result.validation.recipientNames.match,
+          date: !result.validation.isOldScreenshot
+        },
+        date_warning: result.validation.dateValidation?.reason || null
+      },
+      // Keep original fields for backward compatibility
+      recordId: result.recordId,
+      invoiceId: result.invoiceId,
+      screenshotId: screenshotId,
+      payment: result.payment,
+      validation: result.validation,
+      fraud: result.fraud
+    };
+
+    res.json(response);
 
   } catch (error) {
     console.error('Verification error:', error);
