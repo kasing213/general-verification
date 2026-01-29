@@ -1,0 +1,43 @@
+{
+  "testConfig": {
+    "MAX_IMAGES": 50,
+    "OUTPUT_DIR": "./test-results",
+    "BATCH_SIZE": 10,
+    "DELAY_MS": 2000,
+    "SKIP_EXISTING": true,
+    "CONFIDENCE_THRESHOLDS": {
+      "HIGH": 0.9,
+      "MEDIUM": 0.7,
+      "LOW": 0.5
+    }
+  },
+  "timestamp": "2026-01-23T13:18:50.803Z",
+  "overview": {
+    "totalImages": 0,
+    "errors": 0,
+    "averageProcessingTime": "0ms"
+  },
+  "accuracy": {
+    "bankStatementDetection": "NaN%",
+    "verificationStatus": "NaN%",
+    "amountExtraction": "NaN%"
+  },
+  "confidenceDistribution": {
+    "high": "Infinity%",
+    "medium": "Infinity%",
+    "low": "Infinity%"
+  },
+  "bankBreakdown": {
+    "ACLEDA Bank": 1,
+    "ABA Bank": 10,
+    "CT": 2,
+    "Wing Bank (Cambodia) Plc": 1,
+    "Vattanac Bank": 1,
+    "Unknown": 1
+  },
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  }
+}

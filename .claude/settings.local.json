@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//d//**)"
+      "Read(//d//**)",
+      "Bash(node:*)"
     ]
   }
 }

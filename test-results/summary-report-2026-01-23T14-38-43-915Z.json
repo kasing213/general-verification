@@ -1,0 +1,46 @@
+{
+  "testConfig": {
+    "MAX_IMAGES": 100,
+    "OUTPUT_DIR": "./test-results",
+    "BATCH_SIZE": 10,
+    "DELAY_MS": 2000,
+    "SKIP_EXISTING": true,
+    "CONFIDENCE_THRESHOLDS": {
+      "HIGH": 0.9,
+      "MEDIUM": 0.7,
+      "LOW": 0.5
+    }
+  },
+  "timestamp": "2026-01-23T14:38:43.915Z",
+  "overview": {
+    "totalImages": 0,
+    "errors": 0,
+    "averageProcessingTime": "0ms"
+  },
+  "accuracy": {
+    "bankStatementDetection": "NaN%",
+    "verificationStatus": "NaN%",
+    "amountExtraction": "NaN%"
+  },
+  "confidenceDistribution": {
+    "high": "Infinity%",
+    "medium": "Infinity%",
+    "low": "Infinity%"
+  },
+  "bankBreakdown": {
+    "ABA Bank": 17,
+    "ACLEDA Bank": 3,
+    "CT": 1,
+    "Unknown": 2,
+    "Vattanac Bank": 1,
+    "Unknown Bank": 1,
+    "ABA BANK": 2,
+    "ACLEDA": 2,
+    "Canadia Bank": 1
+  },
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  }
+}

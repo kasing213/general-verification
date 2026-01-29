@@ -1,0 +1,29 @@
+{
+  "totalTested": 0,
+  "skipped": 0,
+  "bankStatementDetection": {
+    "correct": 0,
+    "incorrect": 0,
+    "accuracy": null
+  },
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  },
+  "confidenceDistribution": {
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "bankBreakdown": {},
+  "errors": [
+    {
+      "imageId": "6963371b346ba12cafe7af1f",
+      "error": "401 You didn't provide an API key. You need to provide your API key in an Authorization header using Bearer auth (i.e. Authorization: Bearer YOUR_KEY), or as the password field (with blank username) if you're accessing the API from your browser and are prompted for a username and password. You can obtain an API key from https://platform.openai.com/account/api-keys.",
+      "timestamp": "2026-01-23T13:07:20.847Z"
+    }
+  ],
+  "averageProcessingTime": 0,
+  "detailedResults": []
+}

@@ -1,0 +1,36 @@
+{
+  "testConfig": {
+    "MAX_IMAGES": 50,
+    "OUTPUT_DIR": "./test-results",
+    "BATCH_SIZE": 10,
+    "DELAY_MS": 2000,
+    "SKIP_EXISTING": true,
+    "CONFIDENCE_THRESHOLDS": {
+      "HIGH": 0.9,
+      "MEDIUM": 0.7,
+      "LOW": 0.5
+    }
+  },
+  "timestamp": "2026-01-23T13:07:20.848Z",
+  "overview": {
+    "totalImages": 0,
+    "errors": 1,
+    "averageProcessingTime": "0ms"
+  },
+  "accuracy": {
+    "bankStatementDetection": "NaN%",
+    "verificationStatus": "NaN%",
+    "amountExtraction": "NaN%"
+  },
+  "confidenceDistribution": {
+    "high": "NaN%",
+    "medium": "NaN%",
+    "low": "NaN%"
+  },
+  "bankBreakdown": {},
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-01-28T03:37:59.763Z",
+  "executiveSummary": {
+    "totalDataPoints": 0,
+    "mlTrainingPotential": null,
+    "systemsAnalyzed": [],
+    "topRecommendations": [],
+    "expectedROI": {
+      "accuracyImprovement": "+25-35%",
+      "implementationTime": "2-4 weeks",
+      "maintenanceOverhead": "Low (automated pipeline)",
+      "businessImpact": "Significantly reduced manual review, faster processing"
+    }
+  },
+  "systemBreakdown": {
+    "ocrService": {
+      "status": "not_available",
+      "dataQuality": "unknown",
+      "trainingReadiness": "needs_more_data"
+    },
+    "scriptclient": {
+      "status": "not_available",
+      "verificationAccuracy": 0,
+      "integrationPotential": "medium"
+    }
+  }
+}

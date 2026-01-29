@@ -1,0 +1,60 @@
+{
+  "testConfig": {
+    "MAX_IMAGES": 500,
+    "OUTPUT_DIR": "./test-results",
+    "BATCH_SIZE": 10,
+    "DELAY_MS": 2000,
+    "SKIP_EXISTING": true,
+    "CONFIDENCE_THRESHOLDS": {
+      "HIGH": 0.9,
+      "MEDIUM": 0.7,
+      "LOW": 0.5
+    }
+  },
+  "timestamp": "2026-01-24T04:02:28.169Z",
+  "overview": {
+    "totalImages": 0,
+    "errors": 0,
+    "averageProcessingTime": "0ms"
+  },
+  "accuracy": {
+    "bankStatementDetection": "NaN%",
+    "verificationStatus": "NaN%",
+    "amountExtraction": "NaN%"
+  },
+  "confidenceDistribution": {
+    "high": "Infinity%",
+    "medium": "Infinity%",
+    "low": "Infinity%"
+  },
+  "bankBreakdown": {
+    "ABA Bank": 172,
+    "ACLEDA Bank": 73,
+    "Unknown": 25,
+    "CT": 3,
+    "Vattanac Bank": 12,
+    "ACLEDA": 18,
+    "Canadia Bank": 5,
+    "ABA BANK": 21,
+    "N/A": 4,
+    "Wing": 2,
+    "Maybank": 1,
+    "Unknown Bank": 4,
+    "(not visible or provided)": 1,
+    "Unknown (CT logo)": 1,
+    "Sathapana": 1,
+    "ABA": 4,
+    "Sathapana Bank": 1,
+    "ACLEDA BANK": 1,
+    "Unnamed Bank": 1,
+    "Unspecified": 1,
+    "Unknown Bank (Cambodia)": 1,
+    "CT Bank": 1,
+    "Wing Bank": 2
+  },
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  }
+}

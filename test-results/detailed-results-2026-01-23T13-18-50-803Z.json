@@ -1,0 +1,1457 @@
+{
+  "totalTested": 0,
+  "skipped": 0,
+  "bankStatementDetection": {
+    "correct": 0,
+    "incorrect": 0,
+    "accuracy": null
+  },
+  "paymentVerification": {
+    "verified": 0,
+    "pending": 0,
+    "rejected": 0
+  },
+  "confidenceDistribution": {
+    "high": 17,
+    "medium": 1,
+    "low": 32
+  },
+  "bankBreakdown": {
+    "ACLEDA Bank": 1,
+    "ABA Bank": 10,
+    "CT": 2,
+    "Wing Bank (Cambodia) Plc": 1,
+    "Vattanac Bank": 1,
+    "Unknown": 1
+  },
+  "errors": [],
+  "averageProcessingTime": 0,
+  "detailedResults": [
+    {
+      "imageId": "697372e6115298618f9031d4",
+      "filename": "b7d5af2d-bf7c-4e0c-8e8a-65771c51f3e6.jpg",
+      "uploadDate": "2026-01-23T13:08:55.013Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 4015,
+      "timestamp": "2026-01-23T13:14:49.875Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973197494147d07ac651b4c",
+      "filename": "15f34fbd-4c48-44f0-84aa-b49f296d0487.jpg",
+      "uploadDate": "2026-01-23T06:47:16.597Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 4867,
+      "timestamp": "2026-01-23T13:14:50.728Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973196a94147d07ac651b49",
+      "filename": "319b2c18-b20a-4949-bf77-15b98a3e8281.jpg",
+      "uploadDate": "2026-01-23T06:47:06.605Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 6783,
+      "timestamp": "2026-01-23T13:14:52.644Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "69734f6e115298618f9031cc",
+      "filename": "b3d06287-763a-4ac1-b74a-d190bf5170fb.jpg",
+      "uploadDate": "2026-01-23T10:37:34.677Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 6851,
+      "timestamp": "2026-01-23T13:14:52.712Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "697354a8115298618f9031d0",
+      "filename": "983a2f01-b70b-43f8-b48f-bcc41bdae0c6.jpg",
+      "uploadDate": "2026-01-23T10:59:52.902Z",
+      "actual": {
+        "amount": 46000,
+        "currency": "KHR",
+        "bank": "ACLEDA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "974eea48",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "015 946 071"
+      },
+      "processingTime": 7281,
+      "timestamp": "2026-01-23T13:14:53.142Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 46000,
+        "currency": "KHR",
+        "transactionId": "974eea48",
+        "referenceNumber": null,
+        "fromAccount": "នូន ពេជ្រ",
+        "toAccount": "015 946 071",
+        "bankName": "ACLEDA Bank",
+        "transactionDate": "2023-09-29T05:55:00",
+        "remark": null,
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "69734f77115298618f9031ce",
+      "filename": "9da2d8ef-f47b-45fe-9c49-3e85bb5fce05.jpg",
+      "uploadDate": "2026-01-23T10:37:43.938Z",
+      "actual": {
+        "amount": 16000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "000234726023D07Z",
+        "recipientName": "CHAN K. and THOEURN T.",
+        "toAccount": "086228226"
+      },
+      "processingTime": 7717,
+      "timestamp": "2026-01-23T13:14:53.578Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 16000,
+        "currency": "KHR",
+        "transactionId": "000234726023D07Z",
+        "referenceNumber": "",
+        "fromAccount": "07616801",
+        "toAccount": "086228226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-23T17:36:55",
+        "remark": "",
+        "recipientName": "CHAN K. and THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "69734f67115298618f9031ca",
+      "filename": "8a372c39-1d4e-4729-84a7-276c38034a2f.jpg",
+      "uploadDate": "2026-01-23T10:37:27.129Z",
+      "actual": {
+        "amount": 16000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "000234726023D07Z",
+        "recipientName": "CHAN K. and THOEURN T.",
+        "toAccount": "086228226"
+      },
+      "processingTime": 7792,
+      "timestamp": "2026-01-23T13:14:53.653Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 16000,
+        "currency": "KHR",
+        "transactionId": "000234726023D07Z",
+        "referenceNumber": null,
+        "fromAccount": "07616801",
+        "toAccount": "086228226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-23T05:36:55",
+        "remark": null,
+        "recipientName": "CHAN K. and THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6973722e115298618f9031d2",
+      "filename": "5eeeb61d-4b97-4ddd-bb81-e7e3c227339e.jpg",
+      "uploadDate": "2026-01-23T13:05:50.096Z",
+      "actual": {
+        "amount": 26000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "04438757",
+        "recipientName": "CHAN K. and THOEURN T.",
+        "toAccount": "CHAN K. and THOEURN T."
+      },
+      "processingTime": 7969,
+      "timestamp": "2026-01-23T13:14:53.829Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 26000,
+        "currency": "KHR",
+        "transactionId": "04438757",
+        "referenceNumber": "000234726023E1FU",
+        "fromAccount": "086228226",
+        "toAccount": "CHAN K. and THOEURN T.",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-23T20:04:57",
+        "remark": "",
+        "recipientName": "CHAN K. and THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "69734933115298618f9031c8",
+      "filename": "ea21ca6d-68db-4b68-87d8-46ca5174306d.jpg",
+      "uploadDate": "2026-01-23T10:10:59.415Z",
+      "actual": {
+        "amount": 72000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47978641222",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 7970,
+      "timestamp": "2026-01-23T13:14:53.831Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 72000,
+        "currency": "KHR",
+        "transactionId": "47978641222",
+        "referenceNumber": "100FT36604226374",
+        "fromAccount": "POV DOEUN (006 930 469)",
+        "toAccount": "086 228 226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-23T17:10:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "69731ec294147d07ac651b4e",
+      "filename": "f0fbc558-d512-4598-bae5-35c0154a685c.jpg",
+      "uploadDate": "2026-01-23T07:09:54.909Z",
+      "actual": {
+        "amount": 26000,
+        "currency": "KHR",
+        "bank": null,
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47920647999",
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "toAccount": "CHAN KASING AND THOEURN THEARY"
+      },
+      "processingTime": 8275,
+      "timestamp": "2026-01-23T13:14:54.136Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 26000,
+        "currency": "KHR",
+        "transactionId": "47920647999",
+        "referenceNumber": null,
+        "fromAccount": "PHON THAVY (010 639 987)",
+        "toAccount": "CHAN KASING AND THOEURN THEARY",
+        "bankName": null,
+        "transactionDate": "2026-01-22T17:03:00",
+        "remark": null,
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6973196394147d07ac651b47",
+      "filename": "a1303d30-7207-42de-baa4-2d1af142ed69.jpg",
+      "uploadDate": "2026-01-23T06:46:59.397Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 53504,
+      "timestamp": "2026-01-23T13:15:49.641Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973194894147d07ac651b3e",
+      "filename": "94893a36-c119-4eb1-a72e-d365eaaf1775.jpg",
+      "uploadDate": "2026-01-23T06:46:32.233Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 53954,
+      "timestamp": "2026-01-23T13:15:50.092Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973195a94147d07ac651b44",
+      "filename": "41c357fc-b9f7-4fdb-8904-045a6bbd0c41.jpg",
+      "uploadDate": "2026-01-23T06:46:50.858Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 54182,
+      "timestamp": "2026-01-23T13:15:50.320Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973171f94147d07ac651b38",
+      "filename": "26d2f921-c076-44f1-b8d0-baa6579fcb82.jpg",
+      "uploadDate": "2026-01-23T06:37:19.634Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 54339,
+      "timestamp": "2026-01-23T13:15:50.477Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973195394147d07ac651b41",
+      "filename": "fa424bb0-569e-4f9f-9b07-38bc1d5f1546.jpg",
+      "uploadDate": "2026-01-23T06:46:43.434Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 56151,
+      "timestamp": "2026-01-23T13:15:52.289Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973193c94147d07ac651b3c",
+      "filename": "c86ecf3b-aa53-4232-a7f0-f815fbb5ac01.jpg",
+      "uploadDate": "2026-01-23T06:46:20.655Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 56331,
+      "timestamp": "2026-01-23T13:15:52.469Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973172594147d07ac651b3a",
+      "filename": "916c51f2-253f-493c-8f3d-a323d9c5e26c.jpg",
+      "uploadDate": "2026-01-23T06:37:25.611Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 56546,
+      "timestamp": "2026-01-23T13:15:52.684Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6973119b94147d07ac651b34",
+      "filename": "58a9fd4f-4fe7-4e52-90c6-deeceb5249e6.jpg",
+      "uploadDate": "2026-01-23T06:13:47.327Z",
+      "actual": {
+        "amount": 20000,
+        "currency": "KHR",
+        "bank": "CT",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47967139242",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": ""
+      },
+      "processingTime": 57383,
+      "timestamp": "2026-01-23T13:15:53.521Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 20000,
+        "currency": "KHR",
+        "transactionId": "47967139242",
+        "referenceNumber": "",
+        "fromAccount": "Savings (016 527 042)",
+        "toAccount": "",
+        "bankName": "CT",
+        "transactionDate": "2026-01-23T13:12:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "697316e294147d07ac651b36",
+      "filename": "e087ff85-40df-4560-b90b-d54201e236f9.jpg",
+      "uploadDate": "2026-01-23T06:36:18.624Z",
+      "actual": {
+        "amount": 64000,
+        "currency": "KHR",
+        "bank": "Wing Bank (Cambodia) Plc",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47967957921",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 58201,
+      "timestamp": "2026-01-23T13:15:54.339Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 64000,
+        "currency": "KHR",
+        "transactionId": "47967957921",
+        "referenceNumber": "100FT36601986910",
+        "fromAccount": "SOPHORN SOK (05274347)",
+        "toAccount": "086 228 226",
+        "bankName": "Wing Bank (Cambodia) Plc",
+        "transactionDate": "2026-01-23T13:30:00",
+        "remark": "Water department Cust Transfer",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972e7a194147d07ac651b32",
+      "filename": "790b6cc2-d728-4a4e-9847-f8fe7611596e.jpg",
+      "uploadDate": "2026-01-23T03:14:41.742Z",
+      "actual": {
+        "amount": 235000,
+        "currency": "KHR",
+        "bank": "Vattanac Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "001FTRA26023A1VL",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "អេកស៊ូដ្រាស: រាសី ចន្ថា (CHAN K. & THOEURN T.)"
+      },
+      "processingTime": 59092,
+      "timestamp": "2026-01-23T13:15:55.230Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 235000,
+        "currency": "KHR",
+        "transactionId": "001FTRA26023A1VL",
+        "referenceNumber": "6d312b08",
+        "fromAccount": "Nov Vichet, Mr (… 383)",
+        "toAccount": "អេកស៊ូដ្រាស: រាសី ចន្ថា (CHAN K. & THOEURN T.)",
+        "bankName": "Vattanac Bank",
+        "transactionDate": "2026-03-23T10:14:00",
+        "remark": "ពិព័រណ៍",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972399594147d07ac651b24",
+      "filename": "270b496a-7ff6-484b-9764-0d1f73c90495.jpg",
+      "uploadDate": "2026-01-22T14:52:05.016Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 53671,
+      "timestamp": "2026-01-23T13:16:50.903Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972399c94147d07ac651b26",
+      "filename": "4954553c-20b1-433b-90fa-b1cf6c45bab0.jpg",
+      "uploadDate": "2026-01-22T14:52:12.980Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 53884,
+      "timestamp": "2026-01-23T13:16:51.116Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "697239a394147d07ac651b28",
+      "filename": "ddef7ce4-34de-4522-9add-90f863c8ad41.jpg",
+      "uploadDate": "2026-01-22T14:52:19.075Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54044,
+      "timestamp": "2026-01-23T13:16:51.276Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972d9e194147d07ac651b2c",
+      "filename": "7be74a90-5e43-4c14-a46b-aa16736c1d78.jpg",
+      "uploadDate": "2026-01-23T02:16:01.594Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54079,
+      "timestamp": "2026-01-23T13:16:51.311Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972321b5cbdeade68f8d8c3",
+      "filename": "1987729b-7048-402f-8abf-30f987121ef9.jpg",
+      "uploadDate": "2026-01-22T14:20:11.305Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54080,
+      "timestamp": "2026-01-23T13:16:51.312Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972e02a94147d07ac651b30",
+      "filename": "1ee96489-bef6-4a50-baa3-8bc0034abf1a.jpg",
+      "uploadDate": "2026-01-23T02:42:50.115Z",
+      "actual": {
+        "amount": 4000,
+        "currency": "KHR",
+        "bank": "",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47957161525",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "005 037 806"
+      },
+      "processingTime": 54308,
+      "timestamp": "2026-01-23T13:16:51.539Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 4000,
+        "currency": "KHR",
+        "transactionId": "47957161525",
+        "referenceNumber": "",
+        "fromAccount": "",
+        "toAccount": "005 037 806",
+        "bankName": "",
+        "transactionDate": "2026-01-23T09:42:00",
+        "remark": "1.00 USD",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972321994147d07ac651b20",
+      "filename": "5e91961c-271d-4edf-8381-27c1667007e4.jpg",
+      "uploadDate": "2026-01-22T14:20:09.887Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54483,
+      "timestamp": "2026-01-23T13:16:51.715Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972399094147d07ac651b22",
+      "filename": "fc2f0b19-c30c-4162-9e0b-329cca518bbe.jpg",
+      "uploadDate": "2026-01-22T14:52:00.137Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54544,
+      "timestamp": "2026-01-23T13:16:51.776Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6972cd4c94147d07ac651b2a",
+      "filename": "74fedf54-35c4-4dbe-a8a5-0b97af8fd836.jpg",
+      "uploadDate": "2026-01-23T01:22:20.087Z",
+      "actual": {
+        "amount": 30000,
+        "currency": "KHR",
+        "bank": "CT",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47953918319",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "CHAN K. & THOEURN T."
+      },
+      "processingTime": 54797,
+      "timestamp": "2026-01-23T13:16:52.029Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 30000,
+        "currency": "KHR",
+        "transactionId": "47953918319",
+        "referenceNumber": "Thanksបង់1624",
+        "fromAccount": "Savings (002 114 086)",
+        "toAccount": "CHAN K. & THOEURN T.",
+        "bankName": "CT",
+        "transactionDate": "2026-01-23T08:21:00",
+        "remark": "Thanksបង់1624",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972dbe394147d07ac651b2e",
+      "filename": "97fc6027-e632-4050-b88b-ec2e71d5f2bc.jpg",
+      "uploadDate": "2026-01-23T02:24:35.698Z",
+      "actual": {
+        "amount": 66000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "FT260207103PH",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": ""
+      },
+      "processingTime": 55161,
+      "timestamp": "2026-01-23T13:16:52.393Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 66000,
+        "currency": "KHR",
+        "transactionId": "FT260207103PH",
+        "referenceNumber": "25935WF4",
+        "fromAccount": "ABA Bank",
+        "toAccount": "",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-20T07:13:00",
+        "remark": "Business",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6971ea7e7c99aa8d34ee8aa8",
+      "filename": "1fd56198-001a-4c30-bbbe-d9a14167a44b.jpg",
+      "uploadDate": "2026-01-22T09:14:38.957Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 54836,
+      "timestamp": "2026-01-23T13:17:49.231Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971da1494147d07ac651b10",
+      "filename": "afa47dca-e119-45ae-aa08-c62fd05d9818.jpg",
+      "uploadDate": "2026-01-22T08:04:36.042Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 55721,
+      "timestamp": "2026-01-23T13:17:50.116Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971ea7b94147d07ac651b14",
+      "filename": "749d2df6-fbc4-4348-8516-b5d173950e1f.jpg",
+      "uploadDate": "2026-01-22T09:14:35.259Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 57832,
+      "timestamp": "2026-01-23T13:17:52.227Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971e92994147d07ac651b12",
+      "filename": "7125fecd-1780-4fe8-9704-f959a6d46693.jpg",
+      "uploadDate": "2026-01-22T09:08:57.056Z",
+      "actual": {
+        "amount": 136000,
+        "currency": "KHR",
+        "bank": "Unknown",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47917903232",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "008 924 926"
+      },
+      "processingTime": 58434,
+      "timestamp": "2026-01-23T13:17:52.829Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 136000,
+        "currency": "KHR",
+        "transactionId": "47917903232",
+        "referenceNumber": "",
+        "fromAccount": "CHAN K. & THOEURN T.",
+        "toAccount": "008 924 926",
+        "bankName": "Unknown",
+        "transactionDate": "2026-01-22T16:08:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972049c94147d07ac651b1a",
+      "filename": "7b25842e-fddc-4785-bf25-4337f6c33fa3.jpg",
+      "uploadDate": "2026-01-22T11:06:04.723Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 58466,
+      "timestamp": "2026-01-23T13:17:52.861Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971f66e94147d07ac651b16",
+      "filename": "4c8ad091-f6ab-467d-8bb7-0e6e85c55cac.jpg",
+      "uploadDate": "2026-01-22T10:05:34.352Z",
+      "actual": {
+        "amount": 14000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "100FT36594734050",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 58645,
+      "timestamp": "2026-01-23T13:17:53.040Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 14000,
+        "currency": "KHR",
+        "transactionId": "100FT36594734050",
+        "referenceNumber": "47920722309",
+        "fromAccount": "BOURY CHANTHY (009 801 160)",
+        "toAccount": "086 228 226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-22T17:04:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6972291c94147d07ac651b1e",
+      "filename": "4baa2d2d-ed5c-4cb7-aa7c-62a1d0fd316b.jpg",
+      "uploadDate": "2026-01-22T13:41:48.736Z",
+      "actual": {
+        "amount": 40000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47931704899",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 59446,
+      "timestamp": "2026-01-23T13:17:53.841Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 40000,
+        "currency": "KHR",
+        "transactionId": "47931704899",
+        "referenceNumber": "100FT36597037346",
+        "fromAccount": "CHHIN CHHORN (007 946 795)",
+        "toAccount": "086 228 226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-22T20:41:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6971f6ad94147d07ac651b18",
+      "filename": "a551740a-8984-4e82-8bf4-d0d75de77bba.jpg",
+      "uploadDate": "2026-01-22T10:06:37.023Z",
+      "actual": {
+        "amount": 26000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "medium",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "not visible",
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "toAccount": "CHAN KASING AND THOEURN THEARY"
+      },
+      "processingTime": 59604,
+      "timestamp": "2026-01-23T13:17:53.999Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 26000,
+        "currency": "KHR",
+        "transactionId": "not visible",
+        "referenceNumber": "47920647999",
+        "fromAccount": "PHON THAVY (010 639 987)",
+        "toAccount": "CHAN KASING AND THOEURN THEARY",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-22T17:03:00",
+        "remark": "",
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "confidence": "medium"
+      }
+    },
+    {
+      "imageId": "6972291d5cbdeade68f8d8c1",
+      "filename": "23ddff8b-d44a-4f67-8394-4f0777d84ca5.jpg",
+      "uploadDate": "2026-01-22T13:41:49.619Z",
+      "actual": {
+        "amount": 40000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47931704899",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 59864,
+      "timestamp": "2026-01-23T13:17:54.258Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 40000,
+        "currency": "KHR",
+        "transactionId": "47931704899",
+        "referenceNumber": "100FT36597037346",
+        "fromAccount": "CHHIN CHHORN (007 946 795)",
+        "toAccount": "086 228 226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-22T20:41:00",
+        "remark": "",
+        "recipientName": "CHAN K. & THOEURN T.",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "69720a7294147d07ac651b1c",
+      "filename": "b080f29a-8875-4c33-85f0-45b36e7739ed.jpg",
+      "uploadDate": "2026-01-22T11:30:58.589Z",
+      "actual": {
+        "amount": 62000,
+        "currency": "KHR",
+        "bank": "ABA Bank",
+        "confidence": "high",
+        "isBankStatement": true,
+        "isPaid": true,
+        "transactionId": "47925191693",
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "toAccount": "086 228 226"
+      },
+      "processingTime": 60141,
+      "timestamp": "2026-01-23T13:17:54.536Z",
+      "rawOcrResult": {
+        "isBankStatement": true,
+        "isPaid": true,
+        "amount": 62000,
+        "currency": "KHR",
+        "transactionId": "47925191693",
+        "referenceNumber": "100FT36595665349",
+        "fromAccount": "SIM PENG SEA (001 058 843)",
+        "toAccount": "086 228 226",
+        "bankName": "ABA Bank",
+        "transactionDate": "2026-01-22T18:25:00",
+        "remark": "",
+        "recipientName": "CHAN KASING AND THOEURN THEARY",
+        "confidence": "high"
+      }
+    },
+    {
+      "imageId": "6971d86994147d07ac651b0e",
+      "filename": "d0feaa0e-1ec7-48ab-b27c-a44a57d8935f.jpg",
+      "uploadDate": "2026-01-22T07:57:29.306Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 51886,
+      "timestamp": "2026-01-23T13:18:48.423Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d81394147d07ac651b02",
+      "filename": "973808f9-a00e-448f-82b2-0cb4a1800ec8.jpg",
+      "uploadDate": "2026-01-22T07:56:03.139Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 51964,
+      "timestamp": "2026-01-23T13:18:48.501Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d7b694147d07ac651afe",
+      "filename": "a982bde4-444d-4aab-99f4-6700ac4adc0d.jpg",
+      "uploadDate": "2026-01-22T07:54:30.063Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 52100,
+      "timestamp": "2026-01-23T13:18:48.638Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d85294147d07ac651b0a",
+      "filename": "c2e295a7-5c88-49c4-a3d5-1cb4cc300d95.jpg",
+      "uploadDate": "2026-01-22T07:57:06.313Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 52205,
+      "timestamp": "2026-01-23T13:18:48.743Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d7c494147d07ac651b00",
+      "filename": "fd82c187-0c3b-44b9-b3b6-3de3d1870702.jpg",
+      "uploadDate": "2026-01-22T07:54:44.813Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 52218,
+      "timestamp": "2026-01-23T13:18:48.755Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d82d94147d07ac651b04",
+      "filename": "ff82ce12-9edb-4310-bc7d-d6716437270f.jpg",
+      "uploadDate": "2026-01-22T07:56:29.480Z",
+      "actual": {
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false
+      },
+      "processingTime": 52461,
+      "timestamp": "2026-01-23T13:18:48.998Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d83894147d07ac651b06",
+      "filename": "a7f54178-d5a1-47c0-a204-4a9cabd09c5e.jpg",
+      "uploadDate": "2026-01-22T07:56:40.212Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 53838,
+      "timestamp": "2026-01-23T13:18:50.375Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d63794147d07ac651afc",
+      "filename": "1be86f33-9941-4fee-9a54-af080b9b3ed8.jpg",
+      "uploadDate": "2026-01-22T07:48:07.463Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 53931,
+      "timestamp": "2026-01-23T13:18:50.469Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d85b94147d07ac651b0c",
+      "filename": "9ff86f35-1989-4cdc-9d64-281f5e16c3e4.jpg",
+      "uploadDate": "2026-01-22T07:57:15.623Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54130,
+      "timestamp": "2026-01-23T13:18:50.667Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    },
+    {
+      "imageId": "6971d84594147d07ac651b08",
+      "filename": "49dc6751-75bb-47e2-91ad-b3758278292a.jpg",
+      "uploadDate": "2026-01-22T07:56:53.102Z",
+      "actual": {
+        "amount": null,
+        "currency": null,
+        "bank": null,
+        "confidence": "low",
+        "isBankStatement": false,
+        "isPaid": false,
+        "transactionId": null,
+        "recipientName": null,
+        "toAccount": null
+      },
+      "processingTime": 54265,
+      "timestamp": "2026-01-23T13:18:50.802Z",
+      "rawOcrResult": {
+        "isBankStatement": false,
+        "isPaid": false,
+        "amount": null,
+        "currency": null,
+        "transactionId": null,
+        "referenceNumber": null,
+        "fromAccount": null,
+        "toAccount": null,
+        "bankName": null,
+        "transactionDate": null,
+        "remark": null,
+        "recipientName": null,
+        "confidence": "low"
+      }
+    }
+  ]
+}

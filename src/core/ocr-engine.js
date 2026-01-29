@@ -3,6 +3,7 @@
 const OpenAI = require('openai');
 const fs = require('fs');
 const { OpenAIRateLimiter, retryWithBackoff } = require('../utils/rate-limiter');
+const { getLearnedPatterns, getImprovedPrompt } = require('../services/pattern-learner');
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -94,11 +95,12 @@ RULES:
 6. Amount MUST be positive (if shows -28,000 KHR, return 28000)`;
 
 /**
- * Analyzes payment screenshot using GPT-4o Vision
+ * Analyzes payment screenshot using GPT-4o Vision with learned patterns
  * @param {string|Buffer} imageInput - Image path or buffer
+ * @param {Object} options - Analysis options including learned patterns
  * @returns {Promise<object>} - OCR result
  */
-async function analyzePaymentScreenshot(imageInput) {
+async function analyzePaymentScreenshot(imageInput, options = {}) {
   const openaiTimeout = parseInt(process.env.OCR_TIMEOUT_MS) || 60000;
 
   // Get base64 image
@@ -112,11 +114,17 @@ async function analyzePaymentScreenshot(imageInput) {
     throw new Error('Invalid image input: must be Buffer or file path');
   }
 
+  // Get learned patterns and improved prompts
+  const learnedPatterns = await getLearnedPatterns(options.expectedBank);
+  const improvedPrompt = await getImprovedPrompt(OCR_PROMPT, learnedPatterns);
+
+  console.log(`🧠 Using learned patterns | Bank: ${options.expectedBank || 'unknown'} | Patterns: ${learnedPatterns.patterns_count || 0}`);
+
   const response = await retryWithBackoff(async () => {
     // Wait for rate limiter slot
     await rateLimiter.waitForSlot();
 
-    console.log('Calling GPT-4o Vision API for Bank Statement OCR...');
+    console.log('Calling GPT-4o Vision API for Bank Statement OCR with learned patterns...');
 
     return await Promise.race([
       openai.chat.completions.create({
@@ -127,7 +135,7 @@ async function analyzePaymentScreenshot(imageInput) {
             content: [
               {
                 type: 'text',
-                text: OCR_PROMPT
+                text: improvedPrompt
               },
               {
                 type: 'image_url',

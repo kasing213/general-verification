@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-01-28T03:37:59.763Z",
+  "systems": {
+    "ocrService": {
+      "source": "MongoDB GridFS",
+      "totalImages": 0,
+      "processed": 0,
+      "bankBreakdown": {},
+      "confidenceDistribution": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "processingTime": {
+        "min": 0,
+        "max": 0,
+        "avg": 0
+      }
+    },
+    "scriptclient": {
+      "source": "PostgreSQL",
+      "totalScreenshots": 0,
+      "verified": 0,
+      "pending": 0,
+      "verificationAccuracy": 0,
+      "tenantBreakdown": {}
+    }
+  },
+  "unified": {
+    "totalDataPoints": 0,
+    "mlTrainingPotential": null,
+    "recommendedActions": []
+  }
+}

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const archiver = require('archiver');
-const apiKeyAuth = require('../middleware/auth');
+const { apiKeyAuth } = require('../middleware/auth');
 const { fraudAlerts, invoices, screenshots } = require('../db/mongo');
 
 const router = express.Router();

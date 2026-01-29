@@ -3,7 +3,7 @@
 const express = require('express');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const apiKeyAuth = require('../middleware/auth');
+const { apiKeyAuth } = require('../middleware/auth');
 const { verifyPayment } = require('../core/verification');
 const { invoices, payments, fraudAlerts, screenshots } = require('../db/mongo');
 const config = require('../config/schema');

@@ -10,6 +10,7 @@ const { getRateLimiterStatus } = require('./core/ocr-engine');
 const verifyRoutes = require('./routes/verify');
 const invoiceRoutes = require('./routes/invoices');
 const exportRoutes = require('./routes/export');
+const learningRoutes = require('./routes/learning');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -93,6 +94,7 @@ app.get('/status', async (req, res) => {
 app.use('/api/v1/verify', verifyRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/export', exportRoutes);
+app.use('/api/v1/learning', learningRoutes);
 
 // ====== Error Handling ======
 
