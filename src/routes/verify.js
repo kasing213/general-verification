@@ -178,11 +178,15 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
 
     result.screenshotId = screenshotId;
 
+    // Get merchant_id from request (for audit interface)
+    const merchantId = req.body.merchant_id || customerId || 'default';
+
     // Save payment record to database
     const paymentRecord = {
       _id: result.recordId,
       invoice_id: invoiceId,
       customer_id: customerId,
+      merchant_id: merchantId,
 
       // OCR data
       amount: result.payment.amount,

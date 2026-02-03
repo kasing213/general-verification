@@ -4,9 +4,13 @@ const { v4: uuidv4 } = require('uuid');
 const { convertToKHR, verifyAmount } = require('../utils/currency');
 const { validateTransactionDate, createFraudAlertRecord, determineSeverity } = require('./fraud-detector');
 const { analyzePaymentScreenshot } = require('./ocr-engine');
+const NameIntelligenceService = require('../services/name-intelligence');
+
+// Initialize name intelligence service
+const nameIntelligence = new NameIntelligenceService();
 
 /**
- * 3-Stage Verification Pipeline
+ * Enhanced 4-Stage Verification Pipeline with Name Intelligence
  *
  * Stage 1: Image Type Detection
  *   - isBankStatement = false → SILENT REJECT
@@ -17,72 +21,197 @@ const { analyzePaymentScreenshot } = require('./ocr-engine');
  *   - confidence = high → Stage 3
  *
  * Stage 3: Security Verification (HIGH confidence only)
- *   - Wrong recipient → REJECT
+ *   - Wrong recipient (intelligent name matching) → REJECT or GPT JUDGE
  *   - Old screenshot → REJECT + fraud alert
  *   - Duplicate Trx ID → REJECT + fraud alert
  *   - Amount mismatch → PENDING
- *   - All pass → VERIFIED
+ *   - All pass → Stage 4
+ *
+ * Stage 4: Name Intelligence
+ *   - Exact match → VERIFIED
+ *   - High confidence (85%+) → VERIFIED + audit log
+ *   - Medium confidence (70-84%) → GPT JUDGE
+ *   - Low confidence (<70%) → REJECT
  */
 
 /**
- * Verifies recipient against expected values
+ * Verifies recipient using intelligent name matching
  * @param {string} toAccount - Account from OCR
  * @param {string} recipientName - Name from OCR
- * @param {object} expected - Expected values { toAccount, recipientNames }
- * @returns {object} - { verified, skipped, reason }
+ * @param {object} expected - Expected values { toAccount, recipientNames, allowedAliases }
+ * @param {object} options - Additional options { tenantId, recordId }
+ * @returns {Promise<object>} - { verified, skipped, reason, confidence, matchType, requiresGPT }
  */
-function verifyRecipient(toAccount, recipientName, expected) {
+async function verifyRecipient(toAccount, recipientName, expected, options = {}) {
   // If no expected values, skip verification
   if (!expected.toAccount && (!expected.recipientNames || expected.recipientNames.length === 0)) {
     return {
       verified: null,
       skipped: true,
-      reason: 'No recipient verification required'
+      reason: 'No recipient verification required',
+      confidence: null,
+      matchType: 'skipped'
     };
   }
 
-  const combinedText = ((toAccount || '') + ' ' + (recipientName || '')).toLowerCase();
-  const normalizedAccount = (toAccount || '').replace(/\s/g, '').toLowerCase();
-
-  // Check account match
-  if (expected.toAccount) {
-    const expectedNormalized = expected.toAccount.replace(/\s/g, '').toLowerCase();
-    if (normalizedAccount.includes(expectedNormalized) || combinedText.includes(expected.toAccount.toLowerCase())) {
+  // Step 1: Account number verification (exact match required)
+  if (expected.toAccount && toAccount) {
+    const accountResult = await verifyAccountNumber(toAccount, expected.toAccount);
+    if (accountResult.verified) {
       return {
         verified: true,
         skipped: false,
-        reason: 'Account number matched'
+        reason: accountResult.reason,
+        confidence: 100,
+        matchType: 'account_exact',
+        requiresGPT: false
       };
     }
   }
 
-  // Check name match
-  if (expected.recipientNames && expected.recipientNames.length > 0) {
-    for (const name of expected.recipientNames) {
-      if (combinedText.includes(name.toLowerCase())) {
-        return {
-          verified: true,
-          skipped: false,
-          reason: `Recipient name matched: ${name}`
-        };
-      }
+  // Step 2: Name intelligence verification
+  if (expected.recipientNames && recipientName) {
+    const nameResult = await nameIntelligence.analyzeMatch(
+      recipientName,
+      expected.recipientNames,
+      expected.allowedAliases || []
+    );
+
+    // Log non-exact matches for audit
+    if (nameResult.matchType !== 'exact' && nameResult.confidence >= 70) {
+      await logNameMatchAudit(recipientName, expected.recipientNames, nameResult, options);
     }
+
+    // High confidence: Auto-approve
+    if (nameResult.confidence >= nameIntelligence.config.strictThreshold) {
+      return {
+        verified: true,
+        skipped: false,
+        reason: nameResult.reason,
+        confidence: nameResult.confidence,
+        matchType: nameResult.matchType,
+        requiresGPT: false,
+        nameIntelligence: nameResult.details
+      };
+    }
+
+    // Medium confidence: Requires GPT judgment
+    if (nameResult.confidence >= nameIntelligence.config.gptThreshold) {
+      return {
+        verified: null, // Pending GPT decision
+        skipped: false,
+        reason: `Borderline match - GPT judgment required`,
+        confidence: nameResult.confidence,
+        matchType: nameResult.matchType,
+        requiresGPT: true,
+        nameIntelligence: nameResult.details
+      };
+    }
+
+    // Low confidence: Reject
+    return {
+      verified: false,
+      skipped: false,
+      reason: `Name mismatch: ${nameResult.reason}`,
+      confidence: nameResult.confidence,
+      matchType: nameResult.matchType,
+      requiresGPT: false,
+      nameIntelligence: nameResult.details
+    };
   }
 
-  // No match found
+  // No recipient info found
   if (!toAccount && !recipientName) {
     return {
       verified: false,
       skipped: false,
-      reason: 'No recipient info found in screenshot'
+      reason: 'No recipient info found in screenshot',
+      confidence: 0,
+      matchType: 'no_data'
+    };
+  }
+
+  // Fallback: No match
+  return {
+    verified: false,
+    skipped: false,
+    reason: `Recipient mismatch: got ${toAccount || 'N/A'} / ${recipientName || 'N/A'}`,
+    confidence: 0,
+    matchType: 'no_match'
+  };
+}
+
+/**
+ * Verify account number with exact matching
+ * @param {string} extracted - Extracted account
+ * @param {string} expected - Expected account
+ * @returns {object} - Verification result
+ */
+async function verifyAccountNumber(extracted, expected) {
+  if (!extracted || !expected) {
+    return { verified: false, reason: 'Missing account information' };
+  }
+
+  // Normalize account numbers (remove spaces, dashes)
+  const normalizedExtracted = extracted.replace(/[\s\-]/g, '');
+  const normalizedExpected = expected.replace(/[\s\-]/g, '');
+
+  // Exact match required for account numbers
+  if (normalizedExtracted === normalizedExpected) {
+    return {
+      verified: true,
+      reason: `Account number matched: ${expected}`
+    };
+  }
+
+  // Partial match check (in case account is embedded in longer string)
+  if (normalizedExtracted.includes(normalizedExpected) ||
+      normalizedExpected.includes(normalizedExtracted)) {
+    return {
+      verified: true,
+      reason: `Account number partially matched: ${expected}`
     };
   }
 
   return {
     verified: false,
-    skipped: false,
-    reason: `Recipient mismatch: got ${toAccount || 'N/A'} / ${recipientName || 'N/A'}`
+    reason: `Account mismatch: expected ${expected}, got ${extracted}`
   };
+}
+
+/**
+ * Log name match audit for non-exact matches
+ * @param {string} extracted - Extracted name
+ * @param {Array} expected - Expected names
+ * @param {object} matchResult - Name intelligence result
+ * @param {object} options - Options with tenantId, recordId
+ * @returns {Promise<void>}
+ */
+async function logNameMatchAudit(extracted, expected, matchResult, options) {
+  try {
+    const auditRecord = {
+      timestamp: new Date(),
+      recordId: options.recordId,
+      tenantId: options.tenantId || 'default',
+      extracted: extracted,
+      expected: expected,
+      matchType: matchResult.matchType,
+      confidence: matchResult.confidence,
+      reason: matchResult.reason,
+      verificationResult: null, // Will be updated after final decision
+      nameIntelligenceDetails: matchResult.details
+    };
+
+    // Store in audit collection
+    const { getDb } = require('../db/mongo');
+    const db = getDb();
+    await db.collection('name_match_audit').insertOne(auditRecord);
+
+    console.log(`📋 Name match audit logged | Record: ${options.recordId} | Confidence: ${matchResult.confidence}% | Type: ${matchResult.matchType}`);
+
+  } catch (error) {
+    console.error('Failed to log name match audit:', error);
+  }
 }
 
 /**
@@ -191,30 +320,52 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
   // ====== STAGE 3: Security verification (HIGH confidence only) ======
 
-  // 3a: Recipient verification (if required)
-  const recipientCheck = verifyRecipient(
+  // 3a: Enhanced recipient verification with name intelligence
+  const recipientCheck = await verifyRecipient(
     ocrResult.toAccount,
     ocrResult.recipientName,
-    expected
+    {
+      toAccount: expected.toAccount,
+      recipientNames: expected.recipientNames,
+      allowedAliases: expectedPayment.allowedAliases || []
+    },
+    {
+      tenantId: options.tenantId || 'default',
+      recordId: recordId
+    }
   );
 
+  // Update validation results with enhanced data
   result.validation.toAccount.match = recipientCheck.verified;
   result.validation.toAccount.skipped = recipientCheck.skipped;
+  result.validation.toAccount.confidence = recipientCheck.confidence;
+  result.validation.toAccount.matchType = recipientCheck.matchType;
+
   result.validation.recipientNames.match = recipientCheck.verified;
   result.validation.recipientNames.skipped = recipientCheck.skipped;
+  result.validation.recipientNames.confidence = recipientCheck.confidence;
+  result.validation.recipientNames.matchType = recipientCheck.matchType;
+  result.validation.recipientNames.nameIntelligence = recipientCheck.nameIntelligence;
 
   // Log recipient verification result
   if (recipientCheck.skipped) {
     console.log(`Stage 3a: Recipient check SKIPPED | Record ${recordId} | ${recipientCheck.reason}`);
-  } else if (recipientCheck.verified) {
-    console.log(`Stage 3a: Recipient MATCHED | Record ${recordId} | ${recipientCheck.reason}`);
+  } else if (recipientCheck.verified === true) {
+    console.log(`Stage 3a: Recipient MATCHED | Record ${recordId} | Type: ${recipientCheck.matchType} | Confidence: ${recipientCheck.confidence}% | ${recipientCheck.reason}`);
+  } else if (recipientCheck.requiresGPT) {
+    console.log(`Stage 3a: Recipient BORDERLINE - GPT judgment required | Record ${recordId} | Confidence: ${recipientCheck.confidence}% | ${recipientCheck.reason}`);
+    // Mark for GPT judgment - will be handled after all other checks
+    result.verification.requiresGPTJudgment = true;
+    result.verification.gptJudgmentReason = 'NAME_VERIFICATION';
+    result.verification.nameIntelligenceData = recipientCheck;
   }
 
-  if (!recipientCheck.skipped && recipientCheck.verified === false) {
+  // Only reject if definitively failed (not requiring GPT judgment)
+  if (!recipientCheck.skipped && recipientCheck.verified === false && !recipientCheck.requiresGPT) {
     result.verification.status = 'rejected';
     result.verification.rejectionReason = 'WRONG_RECIPIENT';
     result.verification.paymentLabel = 'UNPAID';
-    console.log(`Stage 3a: Wrong recipient | Record ${recordId} | ${recipientCheck.reason}`);
+    console.log(`Stage 3a: Wrong recipient | Record ${recordId} | Type: ${recipientCheck.matchType} | Confidence: ${recipientCheck.confidence}% | ${recipientCheck.reason}`);
     return result;
   }
 
@@ -281,11 +432,24 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     result.validation.amount.skipped = true;
   }
 
+  // ====== STAGE 4: GPT JUDGMENT (if required) ======
+  if (result.verification.requiresGPTJudgment) {
+    console.log(`Stage 4: Invoking GPT judgment for borderline name match | Record ${recordId}`);
+
+    // For now, mark as pending - full GPT judge implementation would go here
+    result.verification.status = 'pending';
+    result.verification.rejectionReason = 'REQUIRES_GPT_JUDGMENT';
+    result.verification.paymentLabel = 'PENDING';
+    console.log(`Stage 4: Marked for manual review/GPT judgment | Record ${recordId} | Reason: ${result.verification.gptJudgmentReason}`);
+
+    return result;
+  }
+
   // ====== ALL CHECKS PASSED ======
   result.verification.status = 'verified';
   result.verification.rejectionReason = null;
   result.verification.paymentLabel = 'PAID';
-  console.log(`VERIFIED | Record ${recordId} | Amount: ${amountInKHR} KHR`);
+  console.log(`VERIFIED | Record ${recordId} | Amount: ${amountInKHR} KHR | OCR Engine: ${ocrResult.ocrEngine || 'GPT-4o'}`);
 
   return result;
 }

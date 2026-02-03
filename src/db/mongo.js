@@ -1,6 +1,7 @@
 'use strict';
 
 const { MongoClient, GridFSBucket } = require('mongodb');
+const { v4: uuidv4 } = require('uuid');
 
 // MongoDB connection
 const MONGO_URL = process.env.MONGO_URL;
@@ -13,6 +14,8 @@ let db = null;
 let invoicesCollection = null;
 let paymentsCollection = null;
 let fraudAlertsCollection = null;
+let auditLogsCollection = null;
+let notificationsCollection = null;
 
 // GridFS bucket for image storage
 let screenshotsBucket = null;
@@ -42,6 +45,8 @@ async function connect() {
   invoicesCollection = db.collection('invoices');
   paymentsCollection = db.collection('payments');
   fraudAlertsCollection = db.collection('fraudAlerts');
+  auditLogsCollection = db.collection('auditLogs');
+  notificationsCollection = db.collection('notifications');
 
   // Initialize GridFS bucket for screenshots
   screenshotsBucket = new GridFSBucket(db, { bucketName: 'screenshots' });
@@ -67,6 +72,7 @@ async function createIndexes() {
     // Payments indexes
     await paymentsCollection.createIndex({ invoice_id: 1 });
     await paymentsCollection.createIndex({ customer_id: 1 });
+    await paymentsCollection.createIndex({ merchant_id: 1 });
     await paymentsCollection.createIndex({ transactionId: 1 }, { unique: true, sparse: true });
     await paymentsCollection.createIndex({ verificationStatus: 1 });
     await paymentsCollection.createIndex({ uploadedAt: -1 });
@@ -77,6 +83,18 @@ async function createIndexes() {
     await fraudAlertsCollection.createIndex({ invoice_id: 1 });
     await fraudAlertsCollection.createIndex({ reviewStatus: 1 });
     await fraudAlertsCollection.createIndex({ detectedAt: -1 });
+
+    // Audit logs indexes
+    await auditLogsCollection.createIndex({ payment_id: 1 });
+    await auditLogsCollection.createIndex({ merchant_id: 1 });
+    await auditLogsCollection.createIndex({ timestamp: -1 });
+    await auditLogsCollection.createIndex({ action: 1 });
+
+    // Notifications indexes
+    await notificationsCollection.createIndex({ merchant_id: 1 });
+    await notificationsCollection.createIndex({ payment_id: 1 });
+    await notificationsCollection.createIndex({ status: 1 });
+    await notificationsCollection.createIndex({ created_at: -1 });
 
     console.log('Database indexes created');
   } catch (error) {
@@ -176,6 +194,26 @@ const payments = {
     return paymentsCollection.updateOne(
       { _id: id },
       { $set: { ...updates, updatedAt: new Date() } }
+    );
+  },
+
+  async findByMerchantId(merchantId, filter = {}, options = {}) {
+    const { limit = 100, skip = 0, sort = { uploadedAt: -1 } } = options;
+    const query = { merchant_id: merchantId, ...filter };
+    return paymentsCollection.find(query).sort(sort).skip(skip).limit(limit).toArray();
+  },
+
+  async updateStatus(id, newStatus, merchantId, reason = null) {
+    return paymentsCollection.updateOne(
+      { _id: id },
+      {
+        $set: {
+          verificationStatus: newStatus,
+          updatedAt: new Date(),
+          lastUpdatedBy: merchantId,
+          statusChangeReason: reason
+        }
+      }
     );
   }
 };
@@ -305,6 +343,72 @@ const screenshots = {
   }
 };
 
+// Audit logs operations
+const auditLogs = {
+  async create(log) {
+    const auditLog = {
+      ...log,
+      timestamp: new Date(),
+      id: uuidv4()
+    };
+    const result = await auditLogsCollection.insertOne(auditLog);
+    return result;
+  },
+
+  async findByPaymentId(paymentId) {
+    return auditLogsCollection.find({ payment_id: paymentId }).sort({ timestamp: -1 }).toArray();
+  },
+
+  async findByMerchantId(merchantId, options = {}) {
+    const { limit = 100, skip = 0, sort = { timestamp: -1 } } = options;
+    return auditLogsCollection.find({ merchant_id: merchantId }).sort(sort).skip(skip).limit(limit).toArray();
+  },
+
+  async list(filter = {}, options = {}) {
+    const { limit = 100, skip = 0, sort = { timestamp: -1 } } = options;
+    return auditLogsCollection.find(filter).sort(sort).skip(skip).limit(limit).toArray();
+  }
+};
+
+// Notifications operations
+const notifications = {
+  async create(notification) {
+    const notif = {
+      ...notification,
+      created_at: new Date(),
+      id: uuidv4(),
+      status: notification.status || 'pending'
+    };
+    const result = await notificationsCollection.insertOne(notif);
+    return result;
+  },
+
+  async findByMerchantId(merchantId, options = {}) {
+    const { limit = 50, skip = 0, sort = { created_at: -1 } } = options;
+    return notificationsCollection.find({ merchant_id: merchantId }).sort(sort).skip(skip).limit(limit).toArray();
+  },
+
+  async markAsRead(id) {
+    return notificationsCollection.updateOne(
+      { id },
+      { $set: { status: 'read', read_at: new Date() } }
+    );
+  },
+
+  async markAllAsRead(merchantId) {
+    return notificationsCollection.updateMany(
+      { merchant_id: merchantId, status: 'pending' },
+      { $set: { status: 'read', read_at: new Date() } }
+    );
+  },
+
+  async deleteOld(daysOld = 30) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+    return notificationsCollection.deleteMany({ created_at: { $lt: cutoffDate } });
+  }
+};
+
 module.exports = {
   connect,
   disconnect,
@@ -313,5 +417,7 @@ module.exports = {
   invoices,
   payments,
   fraudAlerts,
-  screenshots
+  screenshots,
+  auditLogs,
+  notifications
 };

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Audit Interface</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-eye-fill"></i>
+                OCR Audit Interface
+            </a>
+
+            <div class="navbar-nav ms-auto">
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-bell-fill"></i>
+                        <span id="notificationBadge" class="badge bg-danger" style="display: none;">0</span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" id="notificationDropdown">
+                        <li><h6 class="dropdown-header">Notifications</h6></li>
+                        <li><div id="notificationList" class="px-3">No new notifications</div></li>
+                    </ul>
+                </div>
+
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-person-circle"></i>
+                        <span id="merchantName">Merchant</span>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" onclick="logout()">Logout</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Login Modal -->
+    <div class="modal fade" id="loginModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Merchant Login</h5>
+                </div>
+                <div class="modal-body">
+                    <form id="loginForm">
+                        <div class="mb-3">
+                            <label for="merchantId" class="form-label">Merchant ID</label>
+                            <input type="text" class="form-control" id="merchantId" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="apiKey" class="form-label">API Key</label>
+                            <input type="password" class="form-control" id="apiKey" required>
+                        </div>
+                        <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="login()">
+                        <span id="loginSpinner" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                        Login
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container-fluid mt-4" id="mainContainer" style="display: none;">
+        <!-- Dashboard Stats -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Verified</h6>
+                                <h2 id="statsVerified">0</h2>
+                            </div>
+                            <div><i class="bi bi-check-circle-fill fs-1"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Pending</h6>
+                                <h2 id="statsPending">0</h2>
+                            </div>
+                            <div><i class="bi bi-clock-fill fs-1"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-danger text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Rejected</h6>
+                                <h2 id="statsRejected">0</h2>
+                            </div>
+                            <div><i class="bi bi-x-circle-fill fs-1"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Low Confidence</h6>
+                                <h2 id="statsLowConfidence">0</h2>
+                            </div>
+                            <div><i class="bi bi-exclamation-triangle-fill fs-1"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Filters</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-2">
+                        <select class="form-select" id="statusFilter">
+                            <option value="">All Status</option>
+                            <option value="verified">Verified</option>
+                            <option value="pending">Pending</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="confidenceFilter">
+                            <option value="">All Confidence</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="bankStatementFilter">
+                            <option value="">All Types</option>
+                            <option value="true">Bank Statements</option>
+                            <option value="false">Other</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="date" class="form-control" id="dateFromFilter">
+                    </div>
+                    <div class="col-md-2">
+                        <input type="date" class="form-control" id="dateToFilter">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100" onclick="loadPayments()">
+                            <i class="bi bi-search"></i> Filter
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payments Table -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Payments</h5>
+                <div>
+                    <button class="btn btn-outline-primary btn-sm" onclick="loadPayments()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="loadingSpinner" class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="table-responsive" id="paymentsTableContainer" style="display: none;">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Screenshot</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Confidence</th>
+                                <th>Date</th>
+                                <th>Bank</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="paymentsTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                <nav aria-label="Page navigation" id="pagination" style="display: none;">
+                    <ul class="pagination justify-content-center" id="paginationList">
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Details Modal -->
+    <div class="modal fade" id="paymentModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Payment Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- Screenshot Column -->
+                        <div class="col-md-6">
+                            <h6>Screenshot</h6>
+                            <div class="text-center">
+                                <img id="paymentScreenshot" src="" class="img-fluid border" style="max-height: 400px;">
+                            </div>
+                        </div>
+
+                        <!-- Details Column -->
+                        <div class="col-md-6">
+                            <h6>Payment Information</h6>
+                            <table class="table table-sm">
+                                <tr><th>Payment ID:</th><td id="detailPaymentId"></td></tr>
+                                <tr><th>Amount:</th><td id="detailAmount"></td></tr>
+                                <tr><th>Currency:</th><td id="detailCurrency"></td></tr>
+                                <tr><th>Status:</th><td id="detailStatus"></td></tr>
+                                <tr><th>Confidence:</th><td id="detailConfidence"></td></tr>
+                                <tr><th>Bank:</th><td id="detailBank"></td></tr>
+                                <tr><th>Transaction ID:</th><td id="detailTransactionId"></td></tr>
+                                <tr><th>Date:</th><td id="detailDate"></td></tr>
+                                <tr><th>Recipient:</th><td id="detailRecipient"></td></tr>
+                                <tr><th>Account:</th><td id="detailAccount"></td></tr>
+                            </table>
+
+                            <!-- Status Change Section -->
+                            <div class="mt-4">
+                                <h6>Change Status</h6>
+                                <div class="d-flex gap-2 mb-3" id="statusButtons">
+                                    <!-- Buttons will be added dynamically -->
+                                </div>
+                                <div id="reasonInput" style="display: none;">
+                                    <textarea class="form-control mb-2" id="statusReason" placeholder="Reason for status change (required for rejections)"></textarea>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-success btn-sm" onclick="confirmStatusChange()">Confirm</button>
+                                        <button class="btn btn-secondary btn-sm" onclick="cancelStatusChange()">Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Audit History -->
+                    <div class="mt-4">
+                        <h6>Audit History</h6>
+                        <div class="timeline" id="auditHistory">
+                            <!-- Timeline will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Status -->
+    <div id="connectionStatus" class="position-fixed bottom-0 end-0 m-3">
+        <div class="badge bg-secondary">
+            <i class="bi bi-circle-fill" id="connectionIcon"></i>
+            <span id="connectionText">Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

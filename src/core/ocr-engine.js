@@ -4,11 +4,18 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const { OpenAIRateLimiter, retryWithBackoff } = require('../utils/rate-limiter');
 const { getLearnedPatterns, getImprovedPrompt } = require('../services/pattern-learner');
+const PaddleOCRService = require('../services/paddle-ocr');
+const PaymentDataParser = require('../services/payment-parser');
+const ImageEnhancerService = require('../services/image-enhancer');
 
-// Initialize OpenAI client
+// Initialize services
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+const paddleOCR = new PaddleOCRService();
+const paymentParser = new PaymentDataParser();
+const imageEnhancer = new ImageEnhancerService();
 
 // Rate limiter configuration
 const OCR_RATE_LIMIT = parseInt(process.env.OCR_RATE_LIMIT_PER_MINUTE) || 10;
@@ -95,28 +102,268 @@ RULES:
 6. Amount MUST be positive (if shows -28,000 KHR, return 28000)`;
 
 /**
- * Analyzes payment screenshot using GPT-4o Vision with learned patterns
+ * Analyzes payment screenshot using intelligent OCR routing
+ * Tries PaddleOCR first, falls back to GPT-4o for complex cases
  * @param {string|Buffer} imageInput - Image path or buffer
  * @param {Object} options - Analysis options including learned patterns
  * @returns {Promise<object>} - OCR result
  */
 async function analyzePaymentScreenshot(imageInput, options = {}) {
-  const openaiTimeout = parseInt(process.env.OCR_TIMEOUT_MS) || 60000;
+  const startTime = Date.now();
 
-  // Get base64 image
-  let base64Image;
+  // Prepare image buffer
+  let imageBuffer;
   if (Buffer.isBuffer(imageInput)) {
-    base64Image = imageInput.toString('base64');
+    imageBuffer = imageInput;
   } else if (typeof imageInput === 'string') {
-    const imageBuffer = await fs.promises.readFile(imageInput);
-    base64Image = imageBuffer.toString('base64');
+    imageBuffer = await fs.promises.readFile(imageInput);
   } else {
     throw new Error('Invalid image input: must be Buffer or file path');
   }
 
+  console.log(`🔍 Starting intelligent OCR analysis | Bank: ${options.expectedBank || 'unknown'}`);
+
+  // Step 1: Apply image enhancement for better OCR accuracy
+  let enhancedImageBuffer = imageBuffer;
+  let enhancementResult = null;
+
+  try {
+    enhancementResult = await imageEnhancer.enhanceImage(imageBuffer, {
+      forceEnhancement: options.forceEnhancement || false,
+      expectedBank: options.expectedBank
+    });
+
+    if (enhancementResult.enhanced) {
+      enhancedImageBuffer = enhancementResult.enhancedBuffer;
+      console.log(`🎨 Image enhanced | Quality: ${enhancementResult.qualityAnalysis.overallScore}/100 | Enhancements: ${enhancementResult.enhancementsApplied.join(', ')}`);
+    } else {
+      console.log(`📸 Skipped enhancement | Quality: ${enhancementResult.qualityAnalysis?.overallScore || 'unknown'}/100`);
+    }
+  } catch (error) {
+    console.warn('⚠️ Image enhancement failed, using original:', error.message);
+  }
+
+  // Step 2: Force PaddleOCR usage (GPT fallback disabled)
+  const paddleResult = await tryPaddleOCR(enhancedImageBuffer, options);
+
+  // Always use PaddleOCR result when GPT fallback is disabled
+  const gptFallbackEnabled = process.env.GPT_FALLBACK_ENABLED === 'true';
+
+  if (!gptFallbackEnabled) {
+    console.log(`🔧 GPT fallback DISABLED - using PaddleOCR result regardless of quality`);
+
+    if (paddleResult && !paddleResult.fallbackReason) {
+      // Success case - add enhancement metadata
+      paddleResult.imageEnhancement = {
+        enhanced: enhancementResult?.enhanced || false,
+        qualityScore: enhancementResult?.qualityAnalysis?.overallScore,
+        enhancementsApplied: enhancementResult?.enhancementsApplied || [],
+        processingTime: enhancementResult?.processingTime || 0
+      };
+
+      console.log(`✅ PaddleOCR success (forced) | Time: ${Date.now() - startTime}ms | Confidence: ${paddleResult.confidence}`);
+      return paddleResult;
+    } else {
+      // PaddleOCR failed - return error but still use PaddleOCR format
+      console.log(`❌ PaddleOCR failed | Reason: ${paddleResult?.fallbackReason || 'Service unavailable'}`);
+
+      const failedResult = {
+        success: false,
+        isBankStatement: false,
+        isPaid: false,
+        confidence: 'low',
+        error: `PaddleOCR failed: ${paddleResult?.fallbackReason || 'Service unavailable'}`,
+        ocrEngine: 'PaddleOCR',
+        processingTime: Date.now() - startTime,
+        imageEnhancement: {
+          enhanced: enhancementResult?.enhanced || false,
+          qualityScore: enhancementResult?.qualityAnalysis?.overallScore,
+          enhancementsApplied: enhancementResult?.enhancementsApplied || [],
+          processingTime: enhancementResult?.processingTime || 0
+        },
+        ocrText: paddleResult?.ocrText || '',
+        debugInfo: {
+          paddleResult: paddleResult,
+          gptFallbackDisabled: true
+        }
+      };
+
+      return failedResult;
+    }
+  }
+
+  // Original flow for when GPT fallback is enabled
+  if (paddleResult && shouldUsePaddleResult(paddleResult)) {
+    // Add enhancement metadata to PaddleOCR result
+    paddleResult.imageEnhancement = {
+      enhanced: enhancementResult?.enhanced || false,
+      qualityScore: enhancementResult?.qualityAnalysis?.overallScore,
+      enhancementsApplied: enhancementResult?.enhancementsApplied || [],
+      processingTime: enhancementResult?.processingTime || 0
+    };
+
+    console.log(`✅ PaddleOCR success | Time: ${Date.now() - startTime}ms | Confidence: ${paddleResult.confidence}`);
+    return paddleResult;
+  }
+
+  // Step 3: Use GPT-4o for complex cases or PaddleOCR failures (if enabled)
+  console.log(`🧠 Falling back to GPT-4o Vision | Reason: ${paddleResult?.fallbackReason || 'PaddleOCR unavailable'}`);
+
+  const gptResult = await analyzeWithGPT4Vision(enhancedImageBuffer, {
+    ...options,
+    paddleHints: paddleResult?.ocrText, // Pass PaddleOCR text as hint
+    enhancementData: enhancementResult // Pass enhancement metadata
+  });
+
+  // Add performance metrics and enhancement metadata
+  gptResult.ocrEngine = 'GPT-4o';
+  gptResult.processingTime = Date.now() - startTime;
+  gptResult.paddleFallbackReason = paddleResult?.fallbackReason;
+  gptResult.imageEnhancement = {
+    enhanced: enhancementResult?.enhanced || false,
+    qualityScore: enhancementResult?.qualityAnalysis?.overallScore,
+    enhancementsApplied: enhancementResult?.enhancementsApplied || [],
+    processingTime: enhancementResult?.processingTime || 0
+  };
+
+  console.log(`✅ GPT-4o analysis complete | Time: ${Date.now() - startTime}ms | Confidence: ${gptResult.confidence}`);
+
+  return gptResult;
+}
+
+/**
+ * Try PaddleOCR extraction and parsing
+ * @param {Buffer} imageBuffer - Image data
+ * @param {Object} options - Options
+ * @returns {Promise<object|null>} - PaddleOCR result or null
+ */
+async function tryPaddleOCR(imageBuffer, options = {}) {
+  try {
+    // Check if PaddleOCR is available
+    if (!paddleOCR.enabled) {
+      return { fallbackReason: 'PaddleOCR disabled' };
+    }
+
+    // Extract text with PaddleOCR
+    const ocrResult = await paddleOCR.extractText(imageBuffer);
+
+    if (!ocrResult || !ocrResult.fullText) {
+      return { fallbackReason: 'PaddleOCR extraction failed' };
+    }
+
+    // Parse payment data from OCR text
+    const paymentData = paymentParser.parsePaymentData(ocrResult.fullText, options.expectedBank);
+
+    // Add OCR metadata
+    paymentData.ocrEngine = 'PaddleOCR';
+    paymentData.ocrConfidence = ocrResult.avgConfidence;
+    paymentData.ocrText = ocrResult.fullText;
+    paymentData.linesExtracted = ocrResult.lines.length;
+
+    // Validate result quality
+    if (!isValidPaddleResult(paymentData, ocrResult)) {
+      return {
+        fallbackReason: `Low quality: confidence=${paymentData.confidence}, isBankStatement=${paymentData.isBankStatement}`,
+        ocrText: ocrResult.fullText
+      };
+    }
+
+    return paymentData;
+
+  } catch (error) {
+    console.error('PaddleOCR processing failed:', error.message);
+    return { fallbackReason: `PaddleOCR error: ${error.message}` };
+  }
+}
+
+/**
+ * Check if PaddleOCR result is good enough to use
+ * @param {object} paddleResult - PaddleOCR result
+ * @returns {boolean} - Should use this result
+ */
+function shouldUsePaddleResult(paddleResult) {
+  if (!paddleResult || paddleResult.fallbackReason) {
+    return false;
+  }
+
+  // Check if GPT fallback is disabled - if so, always try to use PaddleOCR result
+  const gptFallbackEnabled = process.env.GPT_FALLBACK_ENABLED === 'true';
+
+  if (!gptFallbackEnabled) {
+    console.log('🔧 GPT fallback disabled - using PaddleOCR result regardless of quality');
+    return true;
+  }
+
+  // Original strict criteria (only when GPT fallback is enabled)
+  // Must be identified as a bank statement
+  if (!paddleResult.isBankStatement) {
+    return false;
+  }
+
+  // Must have high confidence
+  if (paddleResult.confidence !== 'high') {
+    return false;
+  }
+
+  // Must have payment completion status
+  if (!paddleResult.isPaid) {
+    return false;
+  }
+
+  // Must have essential fields
+  const hasAmount = paddleResult.amount !== null;
+  const hasBankName = paddleResult.bankName !== null;
+  const hasIdentifier = paddleResult.transactionId || paddleResult.toAccount;
+
+  return hasAmount && hasBankName && hasIdentifier;
+}
+
+/**
+ * Validate PaddleOCR result quality
+ * @param {object} paymentData - Parsed payment data
+ * @param {object} ocrResult - OCR raw result
+ * @returns {boolean} - Is valid
+ */
+function isValidPaddleResult(paymentData, ocrResult) {
+  // OCR confidence must be reasonable
+  if (ocrResult.avgConfidence < 0.75) {
+    return false;
+  }
+
+  // Must have extracted meaningful text
+  if (!ocrResult.fullText || ocrResult.fullText.length < 20) {
+    return false;
+  }
+
+  // Payment data must be valid
+  if (!paymentData.isBankStatement || !paymentData.isPaid) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Analyze with GPT-4o Vision (original implementation)
+ * @param {Buffer} imageBuffer - Image data
+ * @param {Object} options - Analysis options
+ * @returns {Promise<object>} - GPT-4o result
+ */
+async function analyzeWithGPT4Vision(imageBuffer, options = {}) {
+  const openaiTimeout = parseInt(process.env.OCR_TIMEOUT_MS) || 60000;
+
+  // Get base64 image
+  const base64Image = imageBuffer.toString('base64');
+
   // Get learned patterns and improved prompts
   const learnedPatterns = await getLearnedPatterns(options.expectedBank);
-  const improvedPrompt = await getImprovedPrompt(OCR_PROMPT, learnedPatterns);
+
+  // Enhance prompt with PaddleOCR hints if available
+  let enhancedPrompt = await getImprovedPrompt(OCR_PROMPT, learnedPatterns);
+
+  if (options.paddleHints) {
+    enhancedPrompt += `\n\nPADDLEOCR EXTRACTED TEXT (for reference):\n${options.paddleHints}`;
+  }
 
   console.log(`🧠 Using learned patterns | Bank: ${options.expectedBank || 'unknown'} | Patterns: ${learnedPatterns.patterns_count || 0}`);
 
@@ -135,7 +382,7 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
             content: [
               {
                 type: 'text',
-                text: improvedPrompt
+                text: enhancedPrompt
               },
               {
                 type: 'image_url',
@@ -154,7 +401,7 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
     ]);
   });
 
-  console.log('OCR completed successfully');
+  console.log('GPT-4o OCR completed successfully');
 
   const aiResponse = response.choices[0].message.content;
 
@@ -189,8 +436,25 @@ function getRateLimiterStatus() {
   return rateLimiter.getStatus();
 }
 
+/**
+ * Get OCR service status
+ * @returns {object} - Service status
+ */
+function getOCRServiceStatus() {
+  return {
+    paddleOCR: paddleOCR.getStatus(),
+    imageEnhancer: imageEnhancer.getStatus(),
+    rateLimiter: rateLimiter.getStatus(),
+    paymentParser: {
+      initialized: !!paymentParser
+    }
+  };
+}
+
 module.exports = {
   analyzePaymentScreenshot,
+  analyzeWithGPT4Vision,
   getRateLimiterStatus,
+  getOCRServiceStatus,
   OCR_PROMPT
 };
