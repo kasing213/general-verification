@@ -270,6 +270,8 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
         bank: result.payment.bankName || "N/A",
         recipient_name: result.payment.recipientName || "N/A"
       },
+      rawText: result.payment.ocrText || "",
+      ocrEngine: result.payment.ocrEngine || "unknown",
       verification: {
         status: result.verification.status,
         message: result.verification.status === 'verified'

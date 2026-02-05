@@ -42,11 +42,13 @@ class PaddleOCRService {
         }
       });
 
-      if (!response.data || !response.data.results || !response.data.results[0]) {
+      if (!response.data) {
         throw new Error('Invalid response from PaddleOCR service');
       }
 
-      const result = this.parseOCRResult(response.data.results[0]);
+      // Handle direct response from PaddleX (not wrapped in results array)
+      const ocrData = response.data.results ? response.data.results[0] : response.data;
+      const result = this.parseOCRResult(ocrData);
       console.log(`PaddleOCR extraction completed | Confidence: ${result.avgConfidence}% | Lines: ${result.lines.length}`);
 
       return result;
@@ -79,10 +81,54 @@ class PaddleOCRService {
 
   /**
    * Parse PaddleOCR response into structured format
-   * @param {Array} ocrResults - Raw OCR results from PaddleOCR
+   * @param {Array|Object} ocrResults - Raw OCR results from PaddleOCR
    * @returns {object} - Parsed OCR data
    */
   parseOCRResult(ocrResults) {
+    // Handle new PaddleX format (object with rec_texts and rec_scores)
+    if (ocrResults && typeof ocrResults === 'object' && !Array.isArray(ocrResults)) {
+      const recTexts = ocrResults.rec_texts || [];
+      const recScores = ocrResults.rec_scores || [];
+      const recPolys = ocrResults.rec_polys || [];
+
+      if (recTexts.length === 0) {
+        return {
+          fullText: '',
+          lines: [],
+          avgConfidence: 0,
+          isHighConfidence: false
+        };
+      }
+
+      const lines = [];
+      let totalConfidence = 0;
+
+      for (let i = 0; i < recTexts.length; i++) {
+        const text = recTexts[i] || '';
+        const confidence = recScores[i] || 0;
+        const bbox = recPolys[i] || [];
+
+        lines.push({
+          text: text.trim(),
+          confidence: confidence,
+          bbox: bbox
+        });
+
+        totalConfidence += confidence;
+      }
+
+      const avgConfidence = lines.length > 0 ? totalConfidence / lines.length : 0;
+      const fullText = lines.map(line => line.text).join(' ').trim();
+
+      return {
+        fullText,
+        lines,
+        avgConfidence: Math.round(avgConfidence * 100) / 100,
+        isHighConfidence: avgConfidence >= this.confidenceThreshold
+      };
+    }
+
+    // Handle old format (array of arrays)
     if (!Array.isArray(ocrResults) || ocrResults.length === 0) {
       return {
         fullText: '',
