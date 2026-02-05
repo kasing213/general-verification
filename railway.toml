@@ -1,0 +1,15 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+startCommand = "node src/index.js"
+
+[env]
+# Railway will automatically inject PORT
+# Add other environment variables in Railway dashboard
+
+[experimental]
+# Enable longer start timeout for Tesseract initialization
+startTimeout = 120

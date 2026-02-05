@@ -12,8 +12,14 @@ const router = express.Router();
 
 // Helper functions for response transformation
 function confidenceToNumber(confidence) {
-  const map = { high: 0.9, medium: 0.7, low: 0.5 };
-  return map[confidence] || 0.5;
+  const map = {
+    high: 0.9,
+    medium: 0.7,
+    low: 0.3,      // Changed from 0.5 to 0.3 for better distinction
+    failed: 0.1,   // For OCR failures
+    error: 0.0     // For system errors
+  };
+  return map[confidence] || 0.1;  // Default to 0.1 instead of 0.5
 }
 
 function formatAmount(amount, currency) {

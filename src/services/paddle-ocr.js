@@ -27,7 +27,12 @@ class PaddleOCRService {
     }
 
     try {
-      console.log('Starting PaddleOCR text extraction...');
+      console.log('🔍 Starting PaddleOCR text extraction...');
+
+      // Validate input
+      if (!imageBuffer || imageBuffer.length === 0) {
+        throw new Error('Empty or invalid image buffer');
+      }
 
       // Preprocess image for better OCR
       const processedImage = await this.preprocessImage(imageBuffer);
@@ -39,22 +44,69 @@ class PaddleOCRService {
         timeout: this.timeout,
         headers: {
           'Content-Type': 'application/json'
+        },
+        validateStatus: function (status) {
+          return status < 500; // Accept 4xx errors to handle them properly
         }
       });
 
+      // Handle HTTP errors
+      if (response.status >= 400) {
+        console.error(`❌ PaddleOCR service error: HTTP ${response.status}`);
+        console.error('Response:', JSON.stringify(response.data, null, 2));
+
+        if (response.status === 400) {
+          throw new Error('PaddleOCR: Bad request - possibly corrupted or unsupported image format');
+        } else if (response.status === 413) {
+          throw new Error('PaddleOCR: Image too large');
+        } else if (response.status === 415) {
+          throw new Error('PaddleOCR: Unsupported media type');
+        } else {
+          throw new Error(`PaddleOCR service returned HTTP ${response.status}`);
+        }
+      }
+
       if (!response.data) {
-        throw new Error('Invalid response from PaddleOCR service');
+        throw new Error('Empty response from PaddleOCR service');
       }
 
       // Handle direct response from PaddleX (not wrapped in results array)
       const ocrData = response.data.results ? response.data.results[0] : response.data;
+
+      if (!ocrData) {
+        throw new Error('No OCR data in response');
+      }
+
       const result = this.parseOCRResult(ocrData);
-      console.log(`PaddleOCR extraction completed | Confidence: ${result.avgConfidence}% | Lines: ${result.lines.length}`);
+
+      console.log(`✅ PaddleOCR extraction completed:`);
+      console.log(`   📝 Lines extracted: ${result.lines.length}`);
+      console.log(`   🎯 Average confidence: ${result.avgConfidence}%`);
+      console.log(`   📊 High confidence: ${result.isHighConfidence ? 'Yes' : 'No'}`);
+
+      if (result.lines.length === 0) {
+        console.warn('⚠️  No text was extracted from the image');
+        console.warn('   This might indicate:');
+        console.warn('   - Image contains no readable text');
+        console.warn('   - Text is too small, blurry, or low contrast');
+        console.warn('   - Image format/encoding issues');
+        console.warn('   - PaddleOCR model limitations');
+      }
 
       return result;
 
     } catch (error) {
-      console.error('PaddleOCR extraction failed:', error.message);
+      console.error('❌ PaddleOCR extraction failed:');
+      console.error(`   Error: ${error.message}`);
+
+      if (error.code === 'ECONNREFUSED') {
+        console.error('   Cause: PaddleOCR service is not running');
+        console.error('   Solution: Start the service with: source paddleocr_env/bin/activate && python scripts/paddle-server.py');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('   Cause: Request timeout');
+        console.error('   Solution: Image might be too large or complex');
+      }
+
       return null;
     }
   }
@@ -66,15 +118,48 @@ class PaddleOCRService {
    */
   async preprocessImage(imageBuffer) {
     try {
-      // Enhance image for better OCR
-      return await sharp(imageBuffer)
-        .resize({ width: 1200, height: 1600, fit: 'inside', withoutEnlargement: true })
-        .sharpen()
-        .gamma(1.2)
-        .jpeg({ quality: 95 })
-        .toBuffer();
+      console.log('📸 Preprocessing image for PaddleOCR...');
+
+      // Get image metadata
+      const metadata = await sharp(imageBuffer).metadata();
+      console.log(`   Original: ${metadata.width}x${metadata.height}, format: ${metadata.format}`);
+
+      // Apply multiple preprocessing steps for better OCR
+      let processedImage = sharp(imageBuffer);
+
+      // 1. Convert to standard JPEG format if needed
+      if (metadata.format !== 'jpeg') {
+        console.log('   Converting to JPEG format...');
+        processedImage = processedImage.jpeg({ quality: 95 });
+      }
+
+      // 2. Resize if image is too large or too small
+      if (metadata.width > 2000 || metadata.height > 2000 ||
+          metadata.width < 300 || metadata.height < 300) {
+        console.log('   Resizing image for optimal OCR...');
+        processedImage = processedImage.resize({
+          width: 1200,
+          height: 1600,
+          fit: 'inside',
+          withoutEnlargement: false
+        });
+      }
+
+      // 3. Enhance image quality
+      console.log('   Applying enhancement filters...');
+      processedImage = processedImage
+        .sharpen(1, 1, 2)  // Moderate sharpening
+        .gamma(1.1)        // Slight gamma correction
+        .normalise()       // Auto-contrast
+        .jpeg({ quality: 95 });
+
+      const result = await processedImage.toBuffer();
+      console.log(`   ✅ Preprocessing complete: ${result.length} bytes`);
+
+      return result;
     } catch (error) {
-      console.warn('Image preprocessing failed, using original:', error.message);
+      console.error('❌ Image preprocessing failed:', error.message);
+      console.log('   Using original image...');
       return imageBuffer;
     }
   }

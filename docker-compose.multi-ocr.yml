@@ -1,0 +1,261 @@
+# Multi-OCR Docker Compose Configuration
+
+services:
+  # =================
+  # MAIN NODE.JS APP
+  # =================
+  ocr-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: ocr-api-service
+    ports:
+      - "3000:3000"
+    environment:
+      # Database
+      - MONGO_URL=${MONGO_URL}
+      - DB_NAME=${DB_NAME:-customerDB}
+
+      # API Keys
+      - API_KEY=${API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MASTER_SECRET_KEY=${MASTER_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+
+      # OCR Configuration
+      - USE_PADDLE_OCR=true
+      - PADDLE_OCR_SERVICE_URL=http://paddleocr:8866/predict/ocr_system
+      - TESSERACT_FALLBACK_ENABLED=true
+      - TESSERACT_CONFIDENCE_THRESHOLD=70
+      - GPT_FALLBACK_ENABLED=true
+
+      # EasyOCR Service
+      - EASYOCR_SERVICE_URL=http://easyocr:8867
+
+      # OpenCV Service
+      - OPENCV_SERVICE_URL=http://opencv-ocr:8868
+
+      # Performance
+      - OCR_RATE_LIMIT_PER_MINUTE=20
+      - OCR_TIMEOUT_MS=60000
+
+    volumes:
+      - ./src:/app/src
+      - ./uploads:/app/uploads
+      - ./test-results:/app/test-results
+    depends_on:
+      - paddleocr
+      - easyocr
+      - opencv-ocr
+    networks:
+      - ocr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  # =================
+  # PADDLEOCR SERVICE
+  # =================
+  paddleocr:
+    image: paddlepaddle/paddleocr:latest-cpu
+    container_name: paddle-ocr-service
+    ports:
+      - "8866:8866"
+    volumes:
+      - ./paddle-models:/models
+      - ./scripts/paddle-server.py:/app/server.py
+    working_dir: /app
+    command: >
+      bash -c "
+        pip install flask flask-cors pillow numpy opencv-python-headless requests &&
+        python server.py
+      "
+    environment:
+      - PYTHONPATH=/opt/conda/envs/python3.8/lib/python3.8/site-packages
+      - LANG_LIST=en,ch
+      - DET_MODEL_PATH=/models/en_PP-OCRv3_det_infer
+      - REC_MODEL_PATH=/models/en_PP-OCRv3_rec_infer
+      - CLS_MODEL_PATH=/models/ch_ppocr_mobile_v2.0_cls_infer
+      - USE_ANGLE_CLS=True
+      - USE_GPU=False
+      - ENABLE_MKLDNN=True
+      - CPU_THREADS=4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8866/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    networks:
+      - ocr-network
+
+  # =================
+  # EASYOCR SERVICE
+  # =================
+  easyocr:
+    build:
+      context: .
+      dockerfile: Dockerfile.easyocr
+    container_name: easyocr-service
+    ports:
+      - "8867:8867"
+    environment:
+      - EASYOCR_HOST=0.0.0.0
+      - EASYOCR_PORT=8867
+      - EASYOCR_DEBUG=false
+      - CUDA_VISIBLE_DEVICES=""  # Force CPU for stability
+    volumes:
+      - easyocr-models:/root/.EasyOCR
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8867/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # EasyOCR takes time to download models
+    restart: unless-stopped
+    networks:
+      - ocr-network
+
+  # =================
+  # OPENCV + TESSERACT SERVICE
+  # =================
+  opencv-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile.opencv
+    container_name: opencv-tesseract-service
+    ports:
+      - "8868:8868"
+    environment:
+      - OPENCV_HOST=0.0.0.0
+      - OPENCV_PORT=8868
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
+      - OMP_THREAD_LIMIT=4
+    volumes:
+      - tessdata:/usr/share/tesseract-ocr/4.00/tessdata
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8868/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - ocr-network
+
+  # =================
+  # GPU VERSIONS (Optional)
+  # =================
+  paddleocr-gpu:
+    image: paddlepaddle/paddleocr:latest-gpu-cuda11.7
+    container_name: paddle-ocr-gpu-service
+    ports:
+      - "8876:8866"
+    volumes:
+      - ./paddle-models:/models
+      - ./scripts/paddle-server.py:/app/server.py
+    working_dir: /app
+    command: >
+      bash -c "
+        pip install flask flask-cors pillow numpy opencv-python-headless requests &&
+        python server.py
+      "
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - USE_GPU=True
+      - LANG_LIST=en,ch
+      - DET_MODEL_PATH=/models/en_PP-OCRv3_det_infer
+      - REC_MODEL_PATH=/models/en_PP-OCRv3_rec_infer
+      - CLS_MODEL_PATH=/models/ch_ppocr_mobile_v2.0_cls_infer
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    networks:
+      - ocr-network
+
+  easyocr-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.easyocr
+      args:
+        - USE_GPU=true
+    container_name: easyocr-gpu-service
+    ports:
+      - "8877:8867"
+    environment:
+      - EASYOCR_HOST=0.0.0.0
+      - EASYOCR_PORT=8867
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - easyocr-models:/root/.EasyOCR
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    networks:
+      - ocr-network
+
+  # =================
+  # MONITORING & UTILS
+  # =================
+  redis:
+    image: redis:7-alpine
+    container_name: ocr-redis-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    profiles:
+      - cache
+    networks:
+      - ocr-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: ocr-nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/ssl/certs
+    depends_on:
+      - ocr-api
+    profiles:
+      - production
+    networks:
+      - ocr-network
+
+networks:
+  ocr-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  paddle-models:
+    driver: local
+  easyocr-models:
+    driver: local
+  tessdata:
+    driver: local
+  redis-data:
+    driver: local
