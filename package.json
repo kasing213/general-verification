@@ -27,7 +27,6 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.17.0",
     "multer": "^1.4.5-lts.1",
-    "opencv4nodejs": "^5.6.0",
     "openai": "^5.8.2",
     "pg": "^8.17.2",
     "sharp": "^0.33.5",
@@ -35,6 +34,9 @@
     "string-similarity": "^4.0.4",
     "tesseract.js": "^7.0.0",
     "uuid": "^11.1.0"
+  },
+  "optionalDependencies": {
+    "opencv4nodejs": "^5.6.0"
   },
   "devDependencies": {
     "jest": "^30.2.0",
