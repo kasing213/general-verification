@@ -13,6 +13,13 @@ try {
   useOpenCV = false;
 }
 
+// Check if user wants to force OpenCV usage
+const forceOpenCV = process.env.FORCE_OPENCV === 'true';
+if (forceOpenCV && !useOpenCV) {
+  console.error('🚨 FORCE_OPENCV is enabled but OpenCV is not available. Please install OpenCV.');
+  process.exit(1);
+}
+
 const sharp = require('sharp');
 const ImageQualityAnalyzer = require('../utils/image-quality');
 

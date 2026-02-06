@@ -7,8 +7,14 @@ const { v4: uuidv4 } = require('uuid');
 const MONGO_URL = process.env.MONGO_URL;
 const DB_NAME = process.env.DB_NAME || 'ocrServiceDB';
 
+// Separate MongoDB connection for screenshots (Railway shared URL)
+const MONGO_SHARE_URL = process.env.MONGO_SHARE_URL;
+const SHARE_DB_NAME = process.env.SHARE_DB_NAME || 'customerDB';
+
 let client = null;
 let db = null;
+let shareClient = null;
+let shareDb = null;
 
 // Collections
 let invoicesCollection = null;
@@ -48,9 +54,24 @@ async function connect() {
   auditLogsCollection = db.collection('auditLogs');
   notificationsCollection = db.collection('notifications');
 
-  // Initialize GridFS bucket for screenshots
-  screenshotsBucket = new GridFSBucket(db, { bucketName: 'screenshots' });
-  console.log('GridFS bucket initialized: screenshots');
+  // Connect to shared database for screenshots if URL provided
+  if (MONGO_SHARE_URL) {
+    console.log('Connecting to shared MongoDB for screenshots...');
+    shareClient = new MongoClient(MONGO_SHARE_URL, {
+      tls: true,
+      tlsAllowInvalidCertificates: true
+    });
+    await shareClient.connect();
+    shareDb = shareClient.db(SHARE_DB_NAME);
+
+    // Initialize GridFS bucket for screenshots in shared database
+    screenshotsBucket = new GridFSBucket(shareDb, { bucketName: 'screenshots' });
+    console.log(`GridFS bucket initialized: screenshots (shared database: ${SHARE_DB_NAME})`);
+  } else {
+    // Initialize GridFS bucket for screenshots in main database
+    screenshotsBucket = new GridFSBucket(db, { bucketName: 'screenshots' });
+    console.log('GridFS bucket initialized: screenshots (main database)');
+  }
 
   // Create indexes
   await createIndexes();
@@ -111,6 +132,13 @@ async function disconnect() {
     client = null;
     db = null;
     console.log('Disconnected from MongoDB');
+  }
+
+  if (shareClient) {
+    await shareClient.close();
+    shareClient = null;
+    shareDb = null;
+    console.log('Disconnected from shared MongoDB');
   }
 }
 
@@ -306,7 +334,8 @@ const screenshots = {
    */
   async getInfo(fileId) {
     const { ObjectId } = require('mongodb');
-    const files = await db.collection('screenshots.files').findOne({ _id: new ObjectId(fileId) });
+    const targetDb = shareDb || db; // Use shared database if available, otherwise main database
+    const files = await targetDb.collection('screenshots.files').findOne({ _id: new ObjectId(fileId) });
     return files;
   },
 
@@ -334,7 +363,8 @@ const screenshots = {
       query[`metadata.${key}`] = value;
     }
 
-    return db.collection('screenshots.files')
+    const targetDb = shareDb || db; // Use shared database if available, otherwise main database
+    return targetDb.collection('screenshots.files')
       .find(query)
       .sort({ uploadDate: -1 })
       .skip(skip)
