@@ -232,7 +232,31 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       processedAt: new Date()
     };
 
-    await payments.create(paymentRecord);
+    try {
+      await payments.create(paymentRecord);
+    } catch (err) {
+      // Handle MongoDB E11000 duplicate key error on transactionId unique sparse index
+      // This catches race conditions where two identical screenshots are processed simultaneously
+      if (err.code === 11000 && err.keyPattern && err.keyPattern.transactionId) {
+        result.verification.status = 'rejected';
+        result.verification.rejectionReason = 'DUPLICATE_TRANSACTION';
+        result.verification.paymentLabel = 'UNPAID';
+        console.log(`E11000: Duplicate transactionId on insert | Record ${result.recordId} | Trx: ${paymentRecord.transactionId}`);
+
+        // Still save with transactionId removed so the record is preserved for audit
+        delete paymentRecord.transactionId;
+        paymentRecord.verificationStatus = 'rejected';
+        paymentRecord.paymentLabel = 'UNPAID';
+        paymentRecord.rejectionReason = 'DUPLICATE_TRANSACTION';
+        try {
+          await payments.create(paymentRecord);
+        } catch (reinsertErr) {
+          console.error(`E11000: Failed to re-insert audit record | Record ${result.recordId}:`, reinsertErr.message);
+        }
+      } else {
+        throw err;
+      }
+    }
 
     // Save fraud alert if detected
     if (result.fraud) {

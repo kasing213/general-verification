@@ -82,7 +82,15 @@ STEP 3: EXTRACT PAYMENT DATA (only if isPaid=TRUE)
 Extract ALL fields carefully:
 - toAccount: The recipient account number (CRITICAL for security)
 - amount: The transfer amount (use POSITIVE number, ignore minus sign)
-- transactionId: The Trx. ID or Transaction ID
+- transactionId: The unique transaction/receipt reference ID (NOT the account/phone number).
+  * Transaction IDs are ALWAYS long alphanumeric strings (UTR/UETR/bank refs, typically 15+ chars)
+  * Account numbers and phone numbers (8-13 pure digits) are NEVER transaction IDs
+  * ABA: labeled "Trx. ID:" — use that exact field
+  * Wing: the LONG alphanumeric number (15+ chars), NOT the 8-10 digit phone/account number
+  * ACLEDA: labeled "Transaction ID" or "TXN ID"
+  * Canadia/Prince/Sathapana: look for "Reference", "Transaction ID", or similar labeled field
+  * If you cannot find a clearly labeled transaction/reference ID, return null
+  * NEVER use an account number, phone number, or short numeric string as transactionId
 - transactionDate: Extract date/time. Convert to ISO format (2026-01-04T13:35:00) if possible. If the date is in Khmer script with Khmer numerals or month names, extract as-is - our parser handles Khmer dates.
 
 Return JSON format:
@@ -533,6 +541,16 @@ async function analyzeWithGPT4Vision(imageBuffer, options = {}) {
       confidence: 'low',
       rawResponse: aiResponse
     };
+  }
+
+  // Normalize GPT's date output via parseKhmerDate (handles Khmer, English, mixed)
+  if (paymentData.transactionDate) {
+    const { parseKhmerDate } = require('./khmer-date');
+    const parsed = parseKhmerDate(paymentData.transactionDate);
+    if (parsed && !isNaN(parsed.getTime())) {
+      paymentData._originalDate = paymentData.transactionDate;
+      paymentData.transactionDate = parsed.toISOString().split('T')[0]; // YYYY-MM-DD
+    }
   }
 
   return paymentData;

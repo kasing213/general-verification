@@ -97,6 +97,20 @@ class PaymentDataParser {
       isPaid: isPaidField
     };
 
+    // Sanitize transactionId: pure digits ≤13 chars = account/phone number, not a transaction ID
+    // Real transaction IDs (UTR/UETR/bank refs) are longer OR contain letters
+    if (extracted.transactionId) {
+      const cleaned = extracted.transactionId.replace(/[\s\-\.]/g, '');
+      const isPureDigits = /^\d+$/.test(cleaned);
+      if (isPureDigits && cleaned.length <= 13) {
+        console.log(`⚠️ [PaymentParser] transactionId "${extracted.transactionId}" is pure digits (${cleaned.length} chars) — likely account/phone, clearing`);
+        if (!extracted.toAccount) {
+          extracted.toAccount = extracted.transactionId;
+        }
+        extracted.transactionId = null;
+      }
+    }
+
     // Calculate confidence after object is created
     extracted.confidence = this.calculateConfidence(cleanText, extracted);
 

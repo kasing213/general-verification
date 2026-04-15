@@ -9,6 +9,58 @@ const NameIntelligenceService = require('../services/name-intelligence');
 // Initialize name intelligence service
 const nameIntelligence = new NameIntelligenceService();
 
+// User-facing messages for rejection reasons
+const USER_MESSAGES = {
+  NOT_BANK_STATEMENT: 'Please upload a bank transfer screenshot showing the payment confirmation.',
+  BLURRY: 'The image quality is too low. Please upload a clearer screenshot.',
+  AMOUNT_MISMATCH: 'The payment amount does not match the expected amount.',
+  WRONG_RECIPIENT: 'The recipient name does not match. Please verify you paid to the correct account.',
+  OLD_SCREENSHOT: 'This screenshot appears to be outdated. Please upload a recent payment screenshot.',
+  DUPLICATE_TRANSACTION: 'This transaction has already been submitted.',
+  REQUIRES_GPT_JUDGMENT: 'The recipient name could not be automatically verified. Awaiting manual review.',
+};
+
+/**
+ * Normalize amount for comparison — handles OCR artifacts and format variations
+ */
+function normalizeAmount(amountStr) {
+  if (typeof amountStr === 'number') return amountStr;
+  if (!amountStr) return 0;
+
+  let cleaned = String(amountStr)
+    .replace(/\s/g, '')
+    .replace(/O/g, '0')        // OCR: letter O → zero
+    .replace(/o/g, '0')
+    .replace(/l(?=\d)/g, '1')  // OCR: lowercase L before digit → one
+    .replace(/[^\d.,\-]/g, '');
+
+  // Handle EU format "28.000,50" vs US format "28,000.50"
+  if (/,\d{1,2}$/.test(cleaned) && /\.\d{3}/.test(cleaned)) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    cleaned = cleaned.replace(/,/g, '');
+  }
+
+  return parseFloat(cleaned) || 0;
+}
+
+/**
+ * Check if medium-confidence result has all critical fields for auto-processing
+ */
+function hasAllCriticalFields(ocrResult) {
+  return ocrResult.amount !== null &&
+         ocrResult.currency &&
+         (ocrResult.transactionId || ocrResult.toAccount);
+}
+
+/**
+ * Normalize account number for comparison — strips spaces, dashes, dots
+ */
+function normalizeAccount(account) {
+  if (!account) return '';
+  return String(account).replace(/[\s\-\.]/g, '');
+}
+
 /**
  * Enhanced 4-Stage Verification Pipeline with Name Intelligence
  *
@@ -152,9 +204,9 @@ async function verifyAccountNumber(extracted, expected) {
     return { verified: false, reason: 'Missing account information' };
   }
 
-  // Normalize account numbers (remove spaces, dashes)
-  const normalizedExtracted = extracted.replace(/[\s\-]/g, '');
-  const normalizedExpected = expected.replace(/[\s\-]/g, '');
+  // Normalize account numbers (remove spaces, dashes, dots)
+  const normalizedExtracted = normalizeAccount(extracted);
+  const normalizedExpected = normalizeAccount(expected);
 
   // Exact match required for account numbers
   if (normalizedExtracted === normalizedExpected) {
@@ -300,22 +352,69 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     fraud: null
   };
 
+  // ====== PRE-CHECK: Duplicate Transaction ID ======
+  // No length guard needed — payment-parser sanitization (pure digits ≤13 → null)
+  // already filters out account/phone numbers before we get here.
+  const extractedTrxId = ocrResult.transactionId ? ocrResult.transactionId.trim() : '';
+  if (extractedTrxId.length > 0) {
+    try {
+      const { payments } = require('../db/mongo');
+      const existingPayment = await payments.findByTransactionId(extractedTrxId);
+
+      if (existingPayment && existingPayment.verificationStatus !== 'rejected') {
+        result.verification.status = 'rejected';
+        result.verification.rejectionReason = 'DUPLICATE_TRANSACTION';
+        result.verification.paymentLabel = 'UNPAID';
+        result.verification.userMessage = USER_MESSAGES.DUPLICATE_TRANSACTION;
+
+        result.fraud = createFraudAlertRecord({
+          fraudType: 'DUPLICATE_TRANSACTION',
+          severity: 'CRITICAL',
+          invoiceId: options.invoiceId,
+          transactionId: extractedTrxId,
+          amount: ocrResult.amount,
+          currency: ocrResult.currency,
+          bankName: ocrResult.bankName,
+          confidence: ocrResult.confidence,
+          verificationNotes: `Duplicate of payment ${existingPayment._id}`
+        });
+
+        console.log(`PRE-CHECK: DUPLICATE_TRANSACTION | Trx ID: ${extractedTrxId} | Existing: ${existingPayment._id} | Record ${recordId}`);
+        return result;
+      }
+    } catch (err) {
+      // DB not connected or query failed — skip duplicate check, proceed with verification
+      console.warn(`PRE-CHECK: Duplicate check skipped (${err.message}) | Record ${recordId}`);
+    }
+  }
+
   // ====== STAGE 1: Is it a bank statement? ======
   if (ocrResult.isBankStatement === false) {
     result.verification.status = 'rejected';
     result.verification.rejectionReason = 'NOT_BANK_STATEMENT';
     result.verification.paymentLabel = 'UNPAID';
+    result.verification.userMessage = USER_MESSAGES.NOT_BANK_STATEMENT;
     console.log(`Stage 1: NOT a bank statement | Record ${recordId}`);
     return result;
   }
 
   // ====== STAGE 2: Confidence check ======
-  if (ocrResult.confidence !== 'high') {
+  // Allow medium confidence if all critical fields are present
+  if (ocrResult.confidence === 'low' ||
+      (ocrResult.confidence === 'medium' && !hasAllCriticalFields(ocrResult))) {
     result.verification.status = 'pending';
     result.verification.rejectionReason = 'BLURRY';
     result.verification.paymentLabel = 'PENDING';
+    result.verification.userMessage = USER_MESSAGES.BLURRY;
     console.log(`Stage 2: Blurry/unclear (${ocrResult.confidence} confidence) | Record ${recordId}`);
     return result;
+  }
+
+  // Medium confidence with all critical fields — proceed with warning
+  if (ocrResult.confidence === 'medium') {
+    result.verification.warnings = result.verification.warnings || [];
+    result.verification.warnings.push('Medium confidence - verify manually if suspicious');
+    console.log(`Stage 2: Medium confidence but all critical fields present - proceeding | Record ${recordId}`);
   }
 
   // ====== STAGE 3: Security verification (HIGH confidence only) ======
@@ -365,6 +464,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     result.verification.status = 'rejected';
     result.verification.rejectionReason = 'WRONG_RECIPIENT';
     result.verification.paymentLabel = 'UNPAID';
+    result.verification.userMessage = USER_MESSAGES.WRONG_RECIPIENT;
     console.log(`Stage 3a: Wrong recipient | Record ${recordId} | Type: ${recipientCheck.matchType} | Confidence: ${recipientCheck.confidence}% | ${recipientCheck.reason}`);
     return result;
   }
@@ -412,8 +512,9 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     // Note: We don't reject on bank mismatch, just record it
   }
 
-  // 3d: Amount verification
-  const amountInKHR = convertToKHR(ocrResult.amount, ocrResult.currency);
+  // 3d: Amount verification (normalize before converting)
+  const normalizedOcrAmount = normalizeAmount(ocrResult.amount);
+  const amountInKHR = convertToKHR(normalizedOcrAmount, ocrResult.currency);
   result.validation.amount.actual = amountInKHR;
 
   if (expected.amount) {
@@ -424,6 +525,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
       result.verification.status = 'pending';
       result.verification.rejectionReason = 'AMOUNT_MISMATCH';
       result.verification.paymentLabel = 'PENDING';
+      result.verification.userMessage = USER_MESSAGES.AMOUNT_MISMATCH;
       console.log(`Stage 3d: Amount mismatch | Record ${recordId} | Expected: ${expected.amount}, Got: ${amountInKHR}`);
       return result;
     }
@@ -440,6 +542,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     result.verification.status = 'pending';
     result.verification.rejectionReason = 'REQUIRES_GPT_JUDGMENT';
     result.verification.paymentLabel = 'PENDING';
+    result.verification.userMessage = USER_MESSAGES.REQUIRES_GPT_JUDGMENT;
     console.log(`Stage 4: Marked for manual review/GPT judgment | Record ${recordId} | Reason: ${result.verification.gptJudgmentReason}`);
 
     return result;
@@ -456,5 +559,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
 module.exports = {
   verifyPayment,
-  verifyRecipient
+  verifyRecipient,
+  normalizeAmount,
+  normalizeAccount
 };
