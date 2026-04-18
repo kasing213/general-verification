@@ -17,6 +17,7 @@ class NameIntelligenceService {
       ['1', 'I'],
       ['I', '1'],
       ['l', '1'],
+      ['l', 'I'],
       ['|', 'I'],
       ['5', 'S'],
       ['S', '5'],
@@ -26,6 +27,11 @@ class NameIntelligenceService {
       ['G', '6'],
       ['2', 'Z'],
       ['Z', '2'],
+      ['v', 'u'],
+      ['u', 'v'],
+      ['q', '9'],
+      ['9', 'q'],
+      ['g', '9'],
       ['.', ','],
       [',', '.'],
       ['rn', 'm'],  // Common OCR confusion
@@ -111,17 +117,7 @@ class NameIntelligenceService {
       steps.push('ocr_correction_failed');
     }
 
-    // Step 4: Token matching
-    const tokenScore = this.tokenMatch(normalizedExtracted, normalizedExpected);
-    if (tokenScore >= 85) {
-      return this.createResult(tokenScore, 'token_match', 'High token similarity', {
-        steps: [...steps, 'token_match'],
-        tokenScore
-      });
-    }
-    steps.push(`token_match_failed_${tokenScore}`);
-
-    // Step 5: Initial/prefix matching
+    // Step 4: Initial/prefix matching (check before token — more specific)
     if (this.config.enableInitialMatching) {
       const initialScore = this.initialMatch(normalizedExtracted, normalizedExpected);
       if (initialScore >= 80) {
@@ -133,16 +129,30 @@ class NameIntelligenceService {
       steps.push(`initial_match_failed_${initialScore}`);
     }
 
-    // Step 6: Levenshtein distance
-    const distance = this.levenshteinDistance(normalizedExtracted, normalizedExpected);
-    if (distance <= this.config.maxLevenshteinDistance) {
-      const score = Math.max(70, 90 - (distance * 10));
-      return this.createResult(score, 'fuzzy', `Levenshtein distance: ${distance}`, {
-        steps: [...steps, 'levenshtein_match'],
-        distance
+    // Step 5: Token matching
+    const tokenScore = this.tokenMatch(normalizedExtracted, normalizedExpected);
+    if (tokenScore >= 85) {
+      return this.createResult(tokenScore, 'token_match', 'High token similarity', {
+        steps: [...steps, 'token_match'],
+        tokenScore
       });
     }
-    steps.push(`levenshtein_failed_${distance}`);
+    steps.push(`token_match_failed_${tokenScore}`);
+
+    // Step 6: Levenshtein distance (use normalized distance for length-independent comparison)
+    const distance = this.levenshteinDistance(normalizedExtracted, normalizedExpected);
+    const maxLen = Math.max(normalizedExtracted.length, normalizedExpected.length);
+    const normalizedDistance = maxLen > 0 ? distance / maxLen : 1;
+
+    if (normalizedDistance <= 0.3) {  // Allow up to 30% difference
+      const score = Math.max(70, Math.round((1 - normalizedDistance) * 100));
+      return this.createResult(score, 'fuzzy', `Levenshtein distance: ${distance}/${maxLen} (${Math.round(normalizedDistance * 100)}%)`, {
+        steps: [...steps, 'levenshtein_match'],
+        distance,
+        normalizedDistance: Math.round(normalizedDistance * 100)
+      });
+    }
+    steps.push(`levenshtein_failed_${distance}_of_${maxLen}`);
 
     // Step 7: Tenant-specific aliases
     const aliasResult = await this.checkAliases(normalizedExtracted, normalizedExpected, allowedAliases);
@@ -177,11 +187,20 @@ class NameIntelligenceService {
   normalizeText(text) {
     if (!text) return '';
 
+    // Khmer script detected — preserve structure, only strip zero-width chars
+    if (/[\u1780-\u17FF]/.test(text)) {
+      return text
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')  // zero-width chars only
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    // Latin script — uppercase + strip punctuation
     return text
-      .toUpperCase()                    // Convert to uppercase
-      .replace(/[^\w\s]/g, '')         // Remove punctuation
-      .replace(/\s+/g, ' ')            // Normalize whitespace
-      .trim();                         // Remove leading/trailing space
+      .toUpperCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**

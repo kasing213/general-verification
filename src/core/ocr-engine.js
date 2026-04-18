@@ -8,6 +8,8 @@ const PaddleOCRService = require('../services/paddle-ocr');
 const PaymentDataParser = require('../services/payment-parser');
 const ImageEnhancerService = require('../services/image-enhancer');
 const MultiOCROrchestrator = require('../services/multi-ocr-orchestrator');
+const claudeDateExtractor = require('../services/claude-date-extractor');
+const BankTemplateMatcher = require('../services/bank-template-matcher');
 
 // Initialize services
 let openai = null;
@@ -25,6 +27,13 @@ const paddleOCR = new PaddleOCRService();
 const paymentParser = new PaymentDataParser();
 const imageEnhancer = new ImageEnhancerService();
 const multiOCROrchestrator = new MultiOCROrchestrator();
+const bankTemplateMatcher = new BankTemplateMatcher();
+
+const BANK_CODE_TO_NAME = {
+  ABA: 'ABA Bank',
+  ACLEDA: 'ACLEDA',
+  Wing: 'Wing',
+};
 
 // Rate limiter configuration
 const OCR_RATE_LIMIT = parseInt(process.env.OCR_RATE_LIMIT_PER_MINUTE) || 10;
@@ -107,7 +116,8 @@ Return JSON format:
   "transactionDate": "string (ISO format preferred, or Khmer format if visible)",
   "remark": "string",
   "recipientName": "string",
-  "confidence": "high/medium/low"
+  "confidence": "high/medium/low",
+  "rawText": "string — ALL visible text from the screenshot, preserving line breaks with \\n. This enables a second-pass bank-specific extractor to verify your fields."
 }
 
 RULES:
@@ -158,6 +168,24 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
     }
   } catch (error) {
     console.warn('⚠️ Image enhancement failed, using original:', error.message);
+  }
+
+  // Step 1.5: Pre-detect bank from image template (color/logo) before OCR
+  // Bank hint flows downstream to PaddleOCR/GPT-4o prompts and to the parser.
+  // Never overrides a merchant-supplied expectedBank.
+  try {
+    const tpl = await bankTemplateMatcher.detectBankType(enhancedImageBuffer);
+    if (tpl && tpl.bank && tpl.confidence >= 0.6) {
+      const fullName = BANK_CODE_TO_NAME[tpl.bank] || tpl.bank;
+      if (!options.expectedBank) {
+        options.expectedBank = fullName;
+      }
+      console.log(`🏦 Bank pre-detected from template: ${fullName} (conf: ${tpl.confidence.toFixed(2)})`);
+    } else {
+      console.log(`🏦 Bank template detection weak (bank: ${tpl?.bank || 'none'}, conf: ${(tpl?.confidence || 0).toFixed(2)}) — relying on text extraction`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ Bank template pre-detection failed: ${err.message} — continuing without hint`);
   }
 
   // Step 2: Try PaddleOCR first
@@ -553,7 +581,222 @@ async function analyzeWithGPT4Vision(imageBuffer, options = {}) {
     }
   }
 
+  // ── Bank-specific field sharpener (port of scriptclient's 0.90-confidence pattern) ──
+  // Runs over GPT-4o's rawText with bank-specific positional regex. Overrides weak/missing
+  // fields when the per-bank extractor produces high-confidence values.
+  const sourceText = paymentData.rawText || options.paddleHints || options.tesseractHints || '';
+  if (paymentData.bankName && sourceText) {
+    try {
+      const bankFieldExtractor = require('../services/bank-field-extractor');
+      const extracted = bankFieldExtractor.extractBankFields(sourceText, paymentData.bankName);
+      if (extracted.applied) {
+        const overridden = bankFieldExtractor.applyToPayment(paymentData, extracted);
+        if (overridden.length > 0) {
+          console.log(`🏦 [${paymentData.bankName}] Bank field extractor sharpened: ${overridden.join(', ')}`);
+          paymentData._bankFieldExtractor = { applied: overridden, confidence: 0.9 };
+        } else {
+          console.log(`🏦 [${paymentData.bankName}] Bank field extractor matched ${Object.keys(extracted.fields).join(', ')} but GPT-4o values already strong`);
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ Bank field extractor failed: ${err.message} — keeping GPT-4o values`);
+    }
+  }
+
+  // ── Override transactionDate with Claude Haiku extraction (more reliable for Khmer dates) ──
+  // Mirrors scriptclient: Haiku returns raw date text → khmer-date.js parses deterministically.
+  // Skips silently if ANTHROPIC_API_KEY is not set.
+  if (claudeDateExtractor.isAvailable()) {
+    try {
+      const haikuRaw = await claudeDateExtractor.extractDateText(imageBuffer);
+      if (haikuRaw) {
+        const { parseKhmerDate } = require('./khmer-date');
+        const parsed = parseKhmerDate(haikuRaw);
+        if (parsed && !isNaN(parsed.getTime())) {
+          const previous = paymentData.transactionDate;
+          paymentData._gptDate = previous;
+          paymentData._haikuRawDate = haikuRaw;
+          paymentData.transactionDate = parsed.toISOString();
+          console.log(`📅 [DATE] Haiku raw "${haikuRaw}" → parsed ${paymentData.transactionDate}${previous ? ` (was: ${previous})` : ''}`);
+        } else {
+          console.warn(`📅 [DATE] Haiku returned "${haikuRaw}" but khmer-date parser returned null — keeping GPT date`);
+        }
+      }
+    } catch (err) {
+      console.warn(`📅 [DATE] Haiku override failed: ${err.message} — keeping GPT date`);
+    }
+  }
+
+  logExtractedFields('GPT-4o', paymentData);
+
+  // ── ESCALATION: retry with stronger pass if first attempt was weak ──
+  const escalationEnabled = process.env.OCR_ESCALATION_ENABLED !== 'false';
+  if (escalationEnabled && needsEscalation(paymentData)) {
+    console.log(`⬆️  Escalating to higher-tier extraction | Reason: ${escalationReason(paymentData)}`);
+    try {
+      const escalated = await escalateExtraction(imageBuffer, paymentData, options);
+      if (escalated && isStrongerResult(escalated, paymentData)) {
+        escalated._escalated = true;
+        escalated._escalatedFrom = { confidence: paymentData.confidence, missing: missingCriticalFields(paymentData) };
+        logExtractedFields('GPT-4o-HIGH', escalated);
+        return escalated;
+      } else {
+        console.log(`⬆️  Escalation did not improve result — keeping original`);
+      }
+    } catch (err) {
+      console.warn(`⚠️ Escalation attempt failed: ${err.message} — keeping original result`);
+    }
+  }
+
   return paymentData;
+}
+
+/**
+ * Check whether a GPT-4o result is weak enough to warrant escalation.
+ */
+function needsEscalation(data) {
+  if (!data) return true;
+  if (data.confidence === 'low' || data.confidence === 'medium') return true;
+  return missingCriticalFields(data).length > 0;
+}
+
+function missingCriticalFields(data) {
+  const missing = [];
+  if (data.isBankStatement === false) return missing; // not a bank stmt — escalation won't help
+  if (!data.amount) missing.push('amount');
+  if (!data.bankName) missing.push('bankName');
+  if (!data.transactionId && !data.toAccount) missing.push('transactionId|toAccount');
+  return missing;
+}
+
+function escalationReason(data) {
+  const missing = missingCriticalFields(data);
+  const parts = [];
+  if (data.confidence === 'low' || data.confidence === 'medium') parts.push(`confidence=${data.confidence}`);
+  if (missing.length) parts.push(`missing=[${missing.join(',')}]`);
+  return parts.join(', ') || 'unknown';
+}
+
+/**
+ * A second extraction pass that scores higher than the first only if it
+ * fills in more critical fields OR raises confidence. Conservative on purpose —
+ * we don't want to overwrite a high-confidence answer with a worse retry.
+ */
+function isStrongerResult(retry, original) {
+  const retryMissing = missingCriticalFields(retry).length;
+  const origMissing = missingCriticalFields(original).length;
+  if (retryMissing < origMissing) return true;
+  if (retryMissing > origMissing) return false;
+
+  const rank = { low: 0, medium: 1, high: 2 };
+  const retryConf = rank[retry.confidence] ?? 0;
+  const origConf = rank[original.confidence] ?? 0;
+  return retryConf > origConf;
+}
+
+/**
+ * Higher-tier extraction. Currently uses GPT-4o with a sharper, gap-aware prompt
+ * that includes the first attempt's output + Paddle/Tesseract hints. To upgrade
+ * to Claude Opus 4.7 (best-in-class vision): add @anthropic-ai/sdk, set
+ * ANTHROPIC_API_KEY, and replace the openai.chat.completions.create() call below
+ * with anthropic.messages.create({ model: 'claude-opus-4-7', ... }).
+ */
+async function escalateExtraction(imageBuffer, firstAttempt, options = {}) {
+  if (!openai) throw new Error('OpenAI client not available for escalation');
+
+  const openaiTimeout = parseInt(process.env.OCR_TIMEOUT_MS) || 60000;
+  const base64Image = imageBuffer.toString('base64');
+  const missing = missingCriticalFields(firstAttempt);
+
+  let escalationPrompt = `You are extracting SPECIFIC FIELDS from a Cambodian bank statement screenshot. A previous extraction was incomplete or low-confidence.
+
+PREVIOUS EXTRACTION (confidence: ${firstAttempt.confidence}):
+${JSON.stringify({
+  bankName: firstAttempt.bankName,
+  amount: firstAttempt.amount,
+  currency: firstAttempt.currency,
+  transactionId: firstAttempt.transactionId,
+  toAccount: firstAttempt.toAccount,
+  recipientName: firstAttempt.recipientName,
+  transactionDate: firstAttempt.transactionDate,
+}, null, 2)}
+
+YOUR JOB: Return improved values for the MISSING or UNCERTAIN fields. Focus on:
+${missing.length ? missing.join(', ') : 'all fields (overall confidence was too low)'}
+
+Common mistakes to avoid:
+- amount: missed the minus sign on ABA "CT" line / wrong decimal placement / extracted random number
+- bankName: failed to identify bank from the header logo (ABA = dark blue, ACLEDA = navy, Wing = orange)
+- transactionId: confused 8-13 digit account/phone number with real Trx ID (real Trx IDs are 15+ chars and contain letters: e.g. "FT24..." for ABA)
+- toAccount: missed the labeled "To account:" / "Beneficiary:" row
+- recipientName: cut off after first word, missed "&" between two names
+
+Return JSON with the SAME SHAPE as the previous extraction (isBankStatement, isPaid, amount, currency, transactionId, referenceNumber, fromAccount, toAccount, bankName, transactionDate, remark, recipientName, confidence). Fill the listed missing fields with corrected values. If you genuinely cannot read a field clearly, return null — do NOT guess. Set confidence='high' only if every critical field is clearly readable.`;
+
+  if (options.paddleHints) {
+    escalationPrompt += `\n\nPADDLEOCR EXTRACTED TEXT:\n${options.paddleHints}`;
+  }
+  if (options.tesseractHints) {
+    escalationPrompt += `\n\nTESSERACT EXTRACTED TEXT:\n${options.tesseractHints}`;
+  }
+
+  const response = await retryWithBackoff(async () => {
+    await rateLimiter.waitForSlot();
+    console.log('Calling GPT-4o (escalation pass) for stronger Bank Statement OCR...');
+    return await Promise.race([
+      openai.chat.completions.create({
+        model: 'gpt-4o',
+        temperature: 0,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: escalationPrompt },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+          ]
+        }],
+        max_tokens: 1500
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('OpenAI escalation timeout')), openaiTimeout)
+      )
+    ]);
+  });
+
+  const aiResponse = response.choices[0].message.content;
+  const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON in escalation response');
+
+  const escalated = JSON.parse(jsonMatch[0]);
+
+  if (escalated.transactionDate) {
+    const { parseKhmerDate } = require('./khmer-date');
+    const parsed = parseKhmerDate(escalated.transactionDate);
+    if (parsed && !isNaN(parsed.getTime())) {
+      escalated._originalDate = escalated.transactionDate;
+      escalated.transactionDate = parsed.toISOString().split('T')[0];
+    }
+  }
+
+  return escalated;
+}
+
+/**
+ * Log all extracted payment fields in a single readable block.
+ * Helps diagnose why a result was marked low/medium confidence by showing
+ * exactly what the model returned (or failed to return).
+ */
+function logExtractedFields(engine, data) {
+  const present = (v) => (v === null || v === undefined || v === '') ? '—' : v;
+  console.log(`📋 [${engine}] Extracted fields:`);
+  console.log(`   isBankStatement: ${present(data.isBankStatement)} | isPaid: ${present(data.isPaid)} | confidence: ${present(data.confidence)}`);
+  console.log(`   bankName:        ${present(data.bankName)}`);
+  console.log(`   amount:          ${present(data.amount)} ${present(data.currency)}`);
+  console.log(`   transactionId:   ${present(data.transactionId)}`);
+  console.log(`   referenceNumber: ${present(data.referenceNumber)}`);
+  console.log(`   toAccount:       ${present(data.toAccount)}`);
+  console.log(`   fromAccount:     ${present(data.fromAccount)}`);
+  console.log(`   recipientName:   ${present(data.recipientName)}`);
+  console.log(`   transactionDate: ${present(data.transactionDate)}${data._originalDate ? ` (raw: ${data._originalDate})` : ''}`);
 }
 
 /**

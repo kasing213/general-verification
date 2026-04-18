@@ -111,6 +111,19 @@ class PaymentDataParser {
       }
     }
 
+    // Validate account format against detected bank
+    if (extracted.toAccount && extracted.bankName) {
+      const accountValidator = require('./account-validator');
+      const validation = accountValidator.validateAccountFormat(extracted.toAccount, extracted.bankName);
+      if (!validation.valid && validation.confidence < 0.5) {
+        console.log(`⚠️ [PaymentParser] Account "${extracted.toAccount}" rejected: ${validation.reason}`);
+        extracted._rejectedAccount = extracted.toAccount;
+        extracted.toAccount = null;
+      } else if (validation.valid) {
+        extracted.toAccount = validation.normalized;
+      }
+    }
+
     // Calculate confidence after object is created
     extracted.confidence = this.calculateConfidence(cleanText, extracted);
 

@@ -406,7 +406,14 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     result.verification.rejectionReason = 'BLURRY';
     result.verification.paymentLabel = 'PENDING';
     result.verification.userMessage = USER_MESSAGES.BLURRY;
-    console.log(`Stage 2: Blurry/unclear (${ocrResult.confidence} confidence) | Record ${recordId}`);
+    const missing = [];
+    if (!ocrResult.amount) missing.push('amount');
+    if (!ocrResult.currency) missing.push('currency');
+    if (!ocrResult.transactionId && !ocrResult.toAccount) missing.push('transactionId|toAccount');
+    if (!ocrResult.bankName) missing.push('bankName');
+    if (!ocrResult.recipientName) missing.push('recipientName');
+    console.log(`Stage 2: PENDING (${ocrResult.confidence} confidence) | Record ${recordId} | Engine: ${ocrResult.ocrEngine || 'unknown'} | Missing: [${missing.join(', ') || 'none'}]`);
+    console.log(`   Got → bank:${ocrResult.bankName || '—'} | amount:${ocrResult.amount || '—'} ${ocrResult.currency || ''} | trxId:${ocrResult.transactionId || '—'} | toAcc:${ocrResult.toAccount || '—'} | recipient:${ocrResult.recipientName || '—'} | date:${ocrResult.transactionDate || '—'}`);
     return result;
   }
 
