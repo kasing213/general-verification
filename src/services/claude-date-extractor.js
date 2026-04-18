@@ -25,8 +25,9 @@ try {
 let client = null;
 function getClient() {
   if (client) return client;
-  if (!Anthropic || !process.env.ANTHROPIC_API_KEY) return null;
-  client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+  if (!Anthropic || !key) return null;
+  client = new Anthropic({ apiKey: key });
   return client;
 }
 
