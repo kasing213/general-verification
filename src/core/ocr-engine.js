@@ -8,7 +8,7 @@ const PaddleOCRService = require('../services/paddle-ocr');
 const PaymentDataParser = require('../services/payment-parser');
 const ImageEnhancerService = require('../services/image-enhancer');
 const MultiOCROrchestrator = require('../services/multi-ocr-orchestrator');
-const claudeDateExtractor = require('../services/claude-date-extractor');
+const claudeOcr = require('../services/claude-ocr');
 const BankTemplateMatcher = require('../services/bank-template-matcher');
 
 // Initialize services
@@ -149,6 +149,28 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
   }
 
   console.log(`🔍 Starting intelligent OCR analysis | Bank: ${options.expectedBank || 'unknown'}`);
+
+  // ====== STEP 0: Claude 3-agent (primary path) ======
+  // 3 parallel Sonnet 4.6 agents (DATE / AMOUNT / META). On any error or when
+  // OCR_PRIMARY=cascade, fall through to the legacy PaddleOCR → Tesseract →
+  // GPT-4o cascade below. Image enhancement is skipped on this path —
+  // Claude vision handles raw screenshots well and the enhancer can degrade
+  // Khmer glyph rendering.
+  const ocrPrimary = (process.env.OCR_PRIMARY || 'claude').toLowerCase();
+  if (ocrPrimary === 'claude' && claudeOcr.isAvailable()) {
+    try {
+      const claudeRaw = await claudeOcr.extractWithClaude(imageBuffer);
+      const adapted = adaptClaudeResult(claudeRaw, Date.now() - startTime);
+      logExtractedFields('Claude', adapted);
+      console.log(`✅ Claude 3-agent OCR success | Time: ${Date.now() - startTime}ms | Confidence: ${adapted.confidence}`);
+      return adapted;
+    } catch (err) {
+      console.warn(`⚠️ Claude OCR failed, falling back to cascade: ${err.message}`);
+      // Intentional fall-through to the legacy cascade below.
+    }
+  } else if (ocrPrimary === 'claude') {
+    console.log(`ℹ️ OCR_PRIMARY=claude but no ANTHROPIC_API_KEY/CLAUDE_API_KEY set — using cascade`);
+  }
 
   // Step 1: Apply image enhancement for better OCR accuracy
   let enhancedImageBuffer = imageBuffer;
@@ -603,30 +625,6 @@ async function analyzeWithGPT4Vision(imageBuffer, options = {}) {
     }
   }
 
-  // ── Override transactionDate with Claude Haiku extraction (more reliable for Khmer dates) ──
-  // Mirrors scriptclient: Haiku returns raw date text → khmer-date.js parses deterministically.
-  // Skips silently if ANTHROPIC_API_KEY is not set.
-  if (claudeDateExtractor.isAvailable()) {
-    try {
-      const haikuRaw = await claudeDateExtractor.extractDateText(imageBuffer);
-      if (haikuRaw) {
-        const { parseKhmerDate } = require('./khmer-date');
-        const parsed = parseKhmerDate(haikuRaw);
-        if (parsed && !isNaN(parsed.getTime())) {
-          const previous = paymentData.transactionDate;
-          paymentData._gptDate = previous;
-          paymentData._haikuRawDate = haikuRaw;
-          paymentData.transactionDate = parsed.toISOString();
-          console.log(`📅 [DATE] Haiku raw "${haikuRaw}" → parsed ${paymentData.transactionDate}${previous ? ` (was: ${previous})` : ''}`);
-        } else {
-          console.warn(`📅 [DATE] Haiku returned "${haikuRaw}" but khmer-date parser returned null — keeping GPT date`);
-        }
-      }
-    } catch (err) {
-      console.warn(`📅 [DATE] Haiku override failed: ${err.message} — keeping GPT date`);
-    }
-  }
-
   logExtractedFields('GPT-4o', paymentData);
 
   // ── ESCALATION: retry with stronger pass if first attempt was weak ──
@@ -778,6 +776,77 @@ Return JSON with the SAME SHAPE as the previous extraction (isBankStatement, isP
   }
 
   return escalated;
+}
+
+/**
+ * Adapt Claude 3-agent output to the shape verification.js / payment record
+ * consumers expect.
+ *
+ *   dateRaw          → parseKhmerDate → transactionDate (ISO)
+ *   transactionId    → sanitize (pure digits ≤13 → null, matches payment-parser rule)
+ *   other fields     → passed through as-is
+ *
+ * Verification + matching are downstream concerns — this helper does no
+ * comparison against expected values; that lives in verification.js.
+ */
+function adaptClaudeResult(claudeRaw, processingTime) {
+  let transactionDate = null;
+  let _originalDate = null;
+  if (claudeRaw.dateRaw) {
+    _originalDate = claudeRaw.dateRaw;
+    try {
+      const { parseKhmerDate } = require('./khmer-date');
+      const parsed = parseKhmerDate(claudeRaw.dateRaw);
+      if (parsed && !isNaN(parsed.getTime())) {
+        transactionDate = parsed.toISOString();
+      } else {
+        console.warn(`📅 [Claude] dateRaw "${claudeRaw.dateRaw}" could not be parsed by khmer-date`);
+      }
+    } catch (err) {
+      console.warn(`📅 [Claude] parseKhmerDate threw: ${err.message}`);
+    }
+  }
+
+  // Sanitize transactionId: pure digits ≤13 chars = account/phone, not a Trx ID.
+  // Mirrors payment-parser's sanitization so Claude's output enters
+  // verification.js already cleaned (and duplicate detection isn't tricked by
+  // account numbers shared across customers).
+  let transactionId = claudeRaw.transactionId;
+  if (transactionId) {
+    const trimmed = String(transactionId).trim();
+    if (/^\d+$/.test(trimmed) && trimmed.length <= 13) {
+      console.log(`🧹 [Claude] transactionId "${trimmed}" is pure digits ≤13 chars — sanitized to null`);
+      transactionId = null;
+    } else {
+      transactionId = trimmed;
+    }
+  }
+
+  return {
+    isBankStatement: claudeRaw.isBankStatement === true,
+    isPaid: claudeRaw.isPaid === true,
+    confidence: claudeRaw.confidence || 'low',
+    amount: claudeRaw.amount,
+    currency: claudeRaw.currency,
+    transactionId,
+    referenceNumber: claudeRaw.referenceNumber || null,
+    fromAccount: claudeRaw.fromAccount || null,
+    toAccount: claudeRaw.toAccount || null,
+    recipientName: claudeRaw.recipientName || null,
+    bankName: claudeRaw.bankName || null,
+    transactionDate,
+    _originalDate,
+    remark: claudeRaw.remark || null,
+    ocrEngine: 'Claude',
+    ocrText: '',
+    processingTime,
+    imageEnhancement: {
+      enhanced: false,
+      qualityScore: null,
+      enhancementsApplied: [],
+      processingTime: 0
+    }
+  };
 }
 
 /**

@@ -5,29 +5,46 @@
 Node.js OCR microservice for Cambodian bank payment verification.
 
 ```
-PaddleOCR → Tesseract → GPT-4o Vision (cascading fallback)
-    ↓
-Payment Parser (bank-specific regex extraction)
-    ↓
-4-Stage Verification Pipeline (verification.js)
-    ↓
-MongoDB Storage (payments, fraudAlerts, screenshots via GridFS)
+Claude 3-agent (primary)   →  PaddleOCR → Tesseract → GPT-4o Vision (fallback cascade)
+    ↓                            ↓
+    └────────────── adaptClaudeResult / Payment Parser ──────────────┘
+                                 ↓
+              4-Stage Verification Pipeline (verification.js)
+                                 ↓
+              MongoDB Storage (payments, fraudAlerts, screenshots via GridFS)
 ```
+
+**Primary path — Claude 3-agent (Sonnet 4.6).** Three parallel agents — DATE
+(verbatim Khmer-safe transcription), AMOUNT (no math, no conversion), and
+META (classification + transactionId/account/recipient/bank) — fire in
+parallel. Wall-clock is `max(A,B,C)` ≈ 2-3s. Activates when
+`ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) is set and `OCR_PRIMARY` is not
+`cascade`. On any error, falls through automatically to the cascade.
+
+**Fallback cascade.** PaddleOCR → Tesseract → GPT-4o Vision. Same code as
+before. Gated by `GPT_FALLBACK_ENABLED` / `TESSERACT_FALLBACK_ENABLED`.
+
+The merchant identity (account, recipient name, expected amount) is NEVER
+hardcoded in either path. It is supplied per request via the `expectedPayment`
+field on the verify endpoint, or resolved from the invoice document. The OCR
+engine only extracts what is on screen; matching happens downstream in
+`verification.js`.
 
 ## Key Files
 
 ```
 src/core/verification.js          - 4-stage verification pipeline + duplicate pre-check
-src/core/ocr-engine.js            - OCR routing (PaddleOCR → Tesseract → GPT-4o)
+src/core/ocr-engine.js            - OCR routing (Claude 3-agent primary → cascade fallback)
 src/core/fraud-detector.js        - Date validation, fraud alert records, severity
 src/core/khmer-date.js            - Deterministic Khmer date/number parser
 
+src/services/claude-ocr.js        - Claude 3-agent OCR (DATE / AMOUNT / META, parallel)
 src/services/payment-parser.js    - Bank-specific regex extraction + transactionId sanitization
 src/services/name-intelligence.js - 7-step name matching (exact → normalize → OCR correct → initial → token → Levenshtein → alias)
 src/services/bank-template-matcher.js - Bank template definitions
 src/services/paddle-ocr.js        - PaddleOCR client
 src/services/tesseract-ocr.js     - Tesseract client
-src/services/image-enhancer.js    - Image quality enhancement
+src/services/image-enhancer.js    - Image quality enhancement (skipped on Claude path)
 
 src/routes/verify.js              - POST /api/v1/verify endpoint + E11000 duplicate handler
 src/routes/audit.js               - Audit trail endpoints
@@ -157,13 +174,20 @@ Deterministic parsing — no AI translation. See scriptclient CLAUDE.md for full
 
 ```
 # OCR Service
-OPENAI_API_KEY              - GPT-4o Vision API key
+OPENAI_API_KEY              - GPT-4o Vision API key (fallback path)
+ANTHROPIC_API_KEY           - Claude API key for the 3-agent primary path
+CLAUDE_API_KEY              - Accepted as an alias for ANTHROPIC_API_KEY
 MONGO_URL                   - MongoDB connection (main DB)
 MONGO_SHARE_URL             - MongoDB connection (shared screenshots DB)
 DB_NAME                     - Main database name (default: ocrServiceDB)
 SHARE_DB_NAME               - Shared database name (default: customerDB)
 
-# OCR Engine Config
+# OCR Engine — Claude primary (default when ANTHROPIC_API_KEY is set)
+OCR_PRIMARY                 - 'claude' (default) | 'cascade' to force legacy path
+CLAUDE_OCR_MODEL            - Model id (default: claude-sonnet-4-6; use claude-opus-4-7 for hard cases)
+CLAUDE_OCR_TIMEOUT_MS       - Per-agent timeout (default: 15000)
+
+# OCR Engine — legacy cascade (fallback path)
 GPT_FALLBACK_ENABLED        - Enable GPT-4o fallback (default: false)
 TESSERACT_FALLBACK_ENABLED  - Enable Tesseract fallback (default: false)
 OCR_RATE_LIMIT_PER_MINUTE   - GPT-4o rate limit (default: 10)
