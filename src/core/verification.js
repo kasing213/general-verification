@@ -18,6 +18,7 @@ const USER_MESSAGES = {
   OLD_SCREENSHOT: 'This screenshot appears to be outdated. Please upload a recent payment screenshot.',
   DUPLICATE_TRANSACTION: 'This transaction has already been submitted.',
   REQUIRES_GPT_JUDGMENT: 'The recipient name could not be automatically verified. Awaiting manual review.',
+  RECIPIENT_UNVERIFIABLE: 'Your payment was received and is awaiting manual confirmation by the merchant.',
 };
 
 /**
@@ -476,6 +477,13 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     return result;
   }
 
+  // Track whether the recipient could be verified at all. verifyRecipient
+  // returns skipped:true when the invoice supplied NEITHER an expected account
+  // NOR a recipient name — in that case a payment to the WRONG account would
+  // otherwise pass on amount+date alone. We must not auto-approve; downgrade to
+  // manual review at the final stage (security: recipient-null bypass).
+  const recipientUnverifiable = recipientCheck.skipped === true;
+
   // 3b: Date validation (old screenshot check)
   if (ocrResult.transactionDate) {
     const dateValidation = validateTransactionDate(ocrResult.transactionDate, uploadedAt, maxAgeDays);
@@ -556,6 +564,18 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   }
 
   // ====== ALL CHECKS PASSED ======
+  // If recipient could not be verified (no expected account/name on the
+  // invoice), do NOT auto-approve on amount+date alone — route to manual
+  // review so the merchant confirms the payment went to the right place.
+  if (recipientUnverifiable) {
+    result.verification.status = 'pending';
+    result.verification.rejectionReason = 'RECIPIENT_UNVERIFIABLE';
+    result.verification.paymentLabel = 'PENDING';
+    result.verification.userMessage = USER_MESSAGES.RECIPIENT_UNVERIFIABLE;
+    console.log(`MANUAL REVIEW (recipient unverifiable) | Record ${recordId} | Amount: ${amountInKHR} KHR`);
+    return result;
+  }
+
   result.verification.status = 'verified';
   result.verification.rejectionReason = null;
   result.verification.paymentLabel = 'PAID';
