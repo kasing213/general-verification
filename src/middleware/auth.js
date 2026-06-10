@@ -65,18 +65,11 @@ function learningApiAuth(req, res, next) {
  */
 function internalServiceAuth(req, res, next) {
   const apiKey = req.headers['x-api-key'];
-  const userAgent = req.headers['user-agent'];
   const origin = req.headers['origin'] || req.headers['referer'];
 
   // If API key is provided, validate it
   if (apiKey) {
     return learningApiAuth(req, res, next);
-  }
-
-  // For internal services without API key, check other indicators
-  if (userAgent && (userAgent.includes('scriptclient') || userAgent.includes('axios'))) {
-    console.log(`🚀 Internal service access detected | User-Agent: ${userAgent}`);
-    return next();
   }
 
   // Check if request comes from Railway internal network

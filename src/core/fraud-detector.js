@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { parseKhmerDate } = require('./khmer-date');
+const { FRAUD_TYPES } = require('./fraud-types');
 
 /**
  * Validates transaction date and checks for screenshot age fraud
@@ -22,7 +23,7 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
   // Check 1: Missing transaction date
   if (!transactionDateStr || transactionDateStr === 'null' || transactionDateStr === 'undefined') {
     result.isValid = false;
-    result.fraudType = 'MISSING_DATE';
+    result.fraudType = FRAUD_TYPES.MISSING_DATE;
     result.reason = 'Transaction date not found in screenshot';
     return result;
   }
@@ -34,7 +35,7 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
 
     if (!transactionDate || isNaN(transactionDate.getTime())) {
       result.isValid = false;
-      result.fraudType = 'INVALID_DATE';
+      result.fraudType = FRAUD_TYPES.INVALID_DATE;
       result.reason = `Invalid date format: ${transactionDateStr}`;
       return result;
     }
@@ -43,7 +44,7 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
     console.log(`Parsed date: "${transactionDateStr}" -> ${transactionDate.toISOString()}`);
   } catch (error) {
     result.isValid = false;
-    result.fraudType = 'INVALID_DATE';
+    result.fraudType = FRAUD_TYPES.INVALID_DATE;
     result.reason = `Failed to parse date: ${transactionDateStr}`;
     return result;
   }
@@ -52,7 +53,7 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
   if (transactionDate > uploadedAt) {
     const futureDays = Math.ceil((transactionDate - uploadedAt) / (1000 * 60 * 60 * 24));
     result.isValid = false;
-    result.fraudType = 'FUTURE_DATE';
+    result.fraudType = FRAUD_TYPES.FUTURE_DATE;
     result.ageDays = -futureDays;
     result.reason = `Transaction date is ${futureDays} days in the future`;
     return result;
@@ -64,7 +65,7 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
 
   if (ageDays > maxAgeDays) {
     result.isValid = false;
-    result.fraudType = 'OLD_SCREENSHOT';
+    result.fraudType = FRAUD_TYPES.OLD_SCREENSHOT;
     result.reason = `Screenshot is ${Math.floor(ageDays)} days old (max allowed: ${maxAgeDays} days)`;
     return result;
   }
@@ -132,17 +133,17 @@ function createFraudAlertRecord(fraudData) {
  */
 function determineSeverity(fraudType, context = {}) {
   switch (fraudType) {
-    case 'DUPLICATE_TRANSACTION':
+    case FRAUD_TYPES.DUPLICATE_TRANSACTION:
       return 'CRITICAL';
-    case 'OLD_SCREENSHOT':
+    case FRAUD_TYPES.OLD_SCREENSHOT:
       return context.ageDays > 30 ? 'HIGH' : 'MEDIUM';
-    case 'FUTURE_DATE':
+    case FRAUD_TYPES.FUTURE_DATE:
       return 'HIGH';
-    case 'INVALID_DATE':
+    case FRAUD_TYPES.INVALID_DATE:
       return 'MEDIUM';
-    case 'MISSING_DATE':
+    case FRAUD_TYPES.MISSING_DATE:
       return 'LOW';
-    case 'WRONG_RECIPIENT':
+    case FRAUD_TYPES.WRONG_RECIPIENT:
       return 'HIGH';
     default:
       return 'MEDIUM';

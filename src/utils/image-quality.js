@@ -2,6 +2,7 @@
 
 // Try to load OpenCV, fallback to Sharp if not available
 let cv;
+const sharp = require('sharp');
 
 let useOpenCV = false;
 try {
@@ -53,6 +54,10 @@ class ImageQualityAnalyzer {
    * @returns {Promise<Object>} Quality analysis results
    */
   async analyzeQuality(imageBuffer) {
+    if (!useOpenCV) {
+      return this._analyzeQualitySharp(imageBuffer);
+    }
+
     try {
       const mat = cv.imdecode(imageBuffer);
 
@@ -92,13 +97,76 @@ class ImageQualityAnalyzer {
       return {
         error: error.message,
         overallScore: 0,
-        recommendedEnhancements: ['enhance_all']
+        recommendedEnhancements: ['enhance_all'],
+        dimensions: { width: 0, height: 0, channels: 0, totalPixels: 0 },
+        blur: { variance: 0, level: 'unknown', needsSharpening: true },
+        contrast: { value: 0, level: 'unknown', needsEnhancement: true },
+        brightness: { value: 128, level: 'unknown', needsAdjustment: true },
+        noise: { value: 0, level: 'unknown', needsDenoising: true },
+        skew: { angle: 0, needsCorrection: false },
+        lighting: { uniformity: 1, isUniform: true, needsCorrection: false },
+        textRegions: { count: 0, coverage: 0, hasText: false }
       };
     }
   }
 
   /**
-   * Assess image blur using Laplacian variance
+   * Analyze image quality using Sharp (fallback path)
+   * @param {Buffer} imageBuffer - Image buffer
+   * @returns {Promise<Object>} Quality analysis results
+   */
+  async _analyzeQualitySharp(imageBuffer) {
+    try {
+      const image = sharp(imageBuffer);
+      const metadata = await image.metadata();
+      const stats = await image.stats();
+
+      const analysis = {
+        dimensions: {
+          width: metadata.width,
+          height: metadata.height,
+          channels: metadata.channels,
+          totalPixels: metadata.width * metadata.height
+        },
+        blur: this.assessBlurFromStats(stats, metadata),
+        contrast: this.assessContrastFromStats(stats),
+        brightness: this.assessBrightnessFromStats(stats),
+        noise: this.assessNoiseFromStats(stats),
+        skew: { angle: 0, needsCorrection: false }, // Not detectable with Sharp alone
+        lighting: this.assessLightingFromStats(stats),
+        textRegions: { count: 0, coverage: 0, hasText: false }, // Not detectable with Sharp alone
+        overallScore: 0,
+        recommendedEnhancements: []
+      };
+
+      // Calculate overall quality score
+      analysis.overallScore = this.calculateOverallScore(analysis);
+
+      // Recommend enhancements
+      analysis.recommendedEnhancements = this.recommendEnhancements(analysis);
+
+      return analysis;
+
+    } catch (error) {
+      console.error('Image quality analysis failed:', error.message);
+      return {
+        error: error.message,
+        overallScore: 0,
+        recommendedEnhancements: ['enhance_all'],
+        dimensions: { width: 0, height: 0, channels: 0, totalPixels: 0 },
+        blur: { variance: 0, level: 'unknown', needsSharpening: true },
+        contrast: { value: 0, level: 'unknown', needsEnhancement: true },
+        brightness: { value: 128, level: 'unknown', needsAdjustment: true },
+        noise: { value: 0, level: 'unknown', needsDenoising: true },
+        skew: { angle: 0, needsCorrection: false },
+        lighting: { uniformity: 1, isUniform: true, needsCorrection: false },
+        textRegions: { count: 0, coverage: 0, hasText: false }
+      };
+    }
+  }
+
+  /**
+   * Assess image blur using Laplacian variance (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Blur assessment
    */
@@ -133,7 +201,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Assess image contrast using standard deviation
+   * Assess image contrast using standard deviation (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Contrast assessment
    */
@@ -166,7 +234,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Assess image brightness
+   * Assess image brightness (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Brightness assessment
    */
@@ -199,7 +267,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Assess image noise using local standard deviation
+   * Assess image noise using local standard deviation (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Noise assessment
    */
@@ -238,7 +306,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Detect image skew/rotation using Hough line detection
+   * Detect image skew/rotation using Hough line detection (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Skew detection results
    */
@@ -287,7 +355,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Assess lighting uniformity
+   * Assess lighting uniformity (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Lighting assessment
    */
@@ -336,7 +404,7 @@ class ImageQualityAnalyzer {
   }
 
   /**
-   * Detect potential text regions using morphological operations
+   * Detect potential text regions using morphological operations (OpenCV path)
    * @param {cv.Mat} mat - OpenCV matrix
    * @returns {Object} Text region detection results
    */
@@ -372,6 +440,173 @@ class ImageQualityAnalyzer {
     } catch (error) {
       console.error('Text region detection failed:', error.message);
       return { count: 0, coverage: 0, hasText: false };
+    }
+  }
+
+  /**
+   * Assess blur using Sharp statistics (approximation, fallback path)
+   * @param {Object} stats - Sharp image statistics
+   * @param {Object} metadata - Image metadata
+   * @returns {Object} Blur assessment
+   */
+  assessBlurFromStats(stats, metadata) {
+    try {
+      // Use entropy as a proxy for sharpness
+      // Higher entropy generally indicates more detail/sharpness
+      let avgEntropy = 0;
+      if (stats.channels && stats.channels.length > 0) {
+        avgEntropy = stats.channels.reduce((sum, channel) => sum + (channel.entropy || 0), 0) / stats.channels.length;
+      }
+
+      // Scale entropy to variance-like values for compatibility
+      const variance = avgEntropy * 15; // Rough approximation
+
+      let level;
+      if (variance >= this.qualityThresholds.blur.sharp) {
+        level = 'sharp';
+      } else if (variance >= this.qualityThresholds.blur.acceptable) {
+        level = 'acceptable';
+      } else {
+        level = 'blurry';
+      }
+
+      return {
+        variance: Math.round(variance * 100) / 100,
+        level: level,
+        needsSharpening: variance < this.qualityThresholds.blur.acceptable
+      };
+    } catch (error) {
+      return { variance: 0, level: 'unknown', needsSharpening: true };
+    }
+  }
+
+  /**
+   * Assess contrast using Sharp statistics (fallback path)
+   * @param {Object} stats - Sharp image statistics
+   * @returns {Object} Contrast assessment
+   */
+  assessContrastFromStats(stats) {
+    try {
+      // Use standard deviation as a proxy for contrast
+      let avgStdDev = 0;
+      if (stats.channels && stats.channels.length > 0) {
+        avgStdDev = stats.channels.reduce((sum, channel) => sum + (channel.std || 0), 0) / stats.channels.length;
+      }
+
+      const contrast = avgStdDev / 255.0; // Normalize to 0-1
+
+      let level;
+      if (contrast >= this.qualityThresholds.contrast.high) {
+        level = 'high';
+      } else if (contrast >= this.qualityThresholds.contrast.acceptable) {
+        level = 'acceptable';
+      } else {
+        level = 'low';
+      }
+
+      return {
+        value: Math.round(contrast * 1000) / 1000,
+        level: level,
+        needsEnhancement: contrast < this.qualityThresholds.contrast.acceptable
+      };
+    } catch (error) {
+      return { value: 0, level: 'unknown', needsEnhancement: true };
+    }
+  }
+
+  /**
+   * Assess brightness using Sharp statistics (fallback path)
+   * @param {Object} stats - Sharp image statistics
+   * @returns {Object} Brightness assessment
+   */
+  assessBrightnessFromStats(stats) {
+    try {
+      // Use mean values across channels
+      let avgMean = 128; // Default middle brightness
+      if (stats.channels && stats.channels.length > 0) {
+        avgMean = stats.channels.reduce((sum, channel) => sum + (channel.mean || 128), 0) / stats.channels.length;
+      }
+
+      let level;
+      if (avgMean < this.qualityThresholds.brightness.dark) {
+        level = 'dark';
+      } else if (avgMean > this.qualityThresholds.brightness.bright) {
+        level = 'bright';
+      } else {
+        level = 'optimal';
+      }
+
+      return {
+        value: Math.round(avgMean),
+        level: level,
+        needsAdjustment: level !== 'optimal'
+      };
+    } catch (error) {
+      return { value: 128, level: 'unknown', needsAdjustment: true };
+    }
+  }
+
+  /**
+   * Assess noise using Sharp statistics (approximation, fallback path)
+   * @param {Object} stats - Sharp image statistics
+   * @returns {Object} Noise assessment
+   */
+  assessNoiseFromStats(stats) {
+    try {
+      // Noise estimation based on variance vs entropy ratio
+      let noiseLevel = 10; // Default moderate noise
+      if (stats.channels && stats.channels.length > 0) {
+        const avgStd = stats.channels.reduce((sum, channel) => sum + (channel.std || 0), 0) / stats.channels.length;
+        const avgEntropy = stats.channels.reduce((sum, channel) => sum + (channel.entropy || 7), 0) / stats.channels.length;
+
+        // High std with low entropy might indicate noise
+        if (avgEntropy > 0) {
+          noiseLevel = (avgStd / avgEntropy) * 3; // Rough approximation
+        }
+      }
+
+      let level;
+      if (noiseLevel <= this.qualityThresholds.noise.clean) {
+        level = 'clean';
+      } else if (noiseLevel <= this.qualityThresholds.noise.acceptable) {
+        level = 'acceptable';
+      } else {
+        level = 'noisy';
+      }
+
+      return {
+        value: Math.round(noiseLevel * 100) / 100,
+        level: level,
+        needsDenoising: noiseLevel > this.qualityThresholds.noise.acceptable
+      };
+    } catch (error) {
+      return { value: 0, level: 'unknown', needsDenoising: true };
+    }
+  }
+
+  /**
+   * Assess lighting uniformity (basic approximation, fallback path)
+   * @param {Object} stats - Sharp image statistics
+   * @returns {Object} Lighting assessment
+   */
+  assessLightingFromStats(stats) {
+    try {
+      // Basic uniformity assessment based on std deviation
+      let uniformity = 1;
+      if (stats.channels && stats.channels.length > 0) {
+        const avgStd = stats.channels.reduce((sum, channel) => sum + (channel.std || 0), 0) / stats.channels.length;
+        uniformity = Math.max(0, 1 - (avgStd / 100)); // Rough approximation
+      }
+
+      const isUniform = uniformity > 0.7;
+
+      return {
+        uniformity: Math.round(uniformity * 1000) / 1000,
+        isUniform: isUniform,
+        needsCorrection: !isUniform
+      };
+    } catch (error) {
+      return { uniformity: 1, isUniform: true, needsCorrection: false };
     }
   }
 
@@ -465,10 +700,4 @@ class ImageQualityAnalyzer {
   }
 }
 
-// Export the appropriate analyzer based on OpenCV availability
-if (useOpenCV) {
-  module.exports = ImageQualityAnalyzer;
-} else {
-  const FallbackAnalyzer = require('./image-quality-fallback');
-  module.exports = FallbackAnalyzer;
-}
+module.exports = ImageQualityAnalyzer;

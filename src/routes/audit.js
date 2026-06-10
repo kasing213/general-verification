@@ -150,8 +150,8 @@ router.get('/payment/:id', merchantAuth, merchantAccessControl, async (req, res)
       });
     }
 
-    // Get audit history
-    const auditHistory = await auditService.getPaymentAuditHistory(paymentId, merchantId);
+    // Get audit history (pass payment object to avoid duplicate fetch)
+    const auditHistory = await auditService.getPaymentAuditHistory(paymentId, merchantId, payment);
 
     // Get available status transitions
     const availableTransitions = auditService.getAvailableTransitions(payment.verificationStatus);

@@ -7,7 +7,11 @@
 
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.API_KEY || 'default-secret-change-in-production';
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required but not set');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
 /**
@@ -219,17 +223,13 @@ function adminAuth(req, res, next) {
     if (err) return;
 
     // Check if merchant has admin privileges
-    // For now, any merchant with 'admin' in ID is considered admin
-    // In production, check against proper admin role system
-    if (!req.merchant.id.includes('admin')) {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required',
-        message: 'This operation requires administrator privileges'
-      });
-    }
-
-    next();
+    // TODO: replace with DB-backed is_admin check (e.g. SELECT is_admin FROM merchants WHERE id = ?)
+    // Deny by default — merchant_id string content MUST NOT grant admin.
+    return res.status(403).json({
+      success: false,
+      error: 'Admin access required',
+      message: 'This operation requires administrator privileges'
+    });
   });
 }
 

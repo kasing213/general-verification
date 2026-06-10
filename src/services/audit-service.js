@@ -139,12 +139,16 @@ class AuditService {
    * Get audit history for a payment
    * @param {string} paymentId - Payment ID
    * @param {string} merchantId - Merchant ID (for access control)
+   * @param {object} payment - Optional payment object (to avoid duplicate fetch)
    * @returns {Promise<array>} - Audit history
    */
-  async getPaymentAuditHistory(paymentId, merchantId = null) {
+  async getPaymentAuditHistory(paymentId, merchantId = null, payment = null) {
     try {
       // Verify payment exists and merchant access
-      const payment = await payments.findById(paymentId);
+      if (!payment) {
+        payment = await payments.findById(paymentId);
+      }
+
       if (!payment) {
         throw new Error(`Payment not found: ${paymentId}`);
       }

@@ -5,6 +5,7 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { apiKeyAuth } = require('../middleware/auth');
 const { verifyPayment } = require('../core/verification');
+const { FRAUD_TYPES } = require('../core/fraud-types');
 const { invoices, payments, fraudAlerts, screenshots } = require('../db/mongo');
 const config = require('../config/schema');
 
@@ -239,7 +240,7 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       // This catches race conditions where two identical screenshots are processed simultaneously
       if (err.code === 11000 && err.keyPattern && err.keyPattern.transactionId) {
         result.verification.status = 'rejected';
-        result.verification.rejectionReason = 'DUPLICATE_TRANSACTION';
+        result.verification.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
         result.verification.paymentLabel = 'UNPAID';
         console.log(`E11000: Duplicate transactionId on insert | Record ${result.recordId} | Trx: ${paymentRecord.transactionId}`);
 
@@ -247,7 +248,7 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
         delete paymentRecord.transactionId;
         paymentRecord.verificationStatus = 'rejected';
         paymentRecord.paymentLabel = 'UNPAID';
-        paymentRecord.rejectionReason = 'DUPLICATE_TRANSACTION';
+        paymentRecord.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
         try {
           await payments.create(paymentRecord);
         } catch (reinsertErr) {

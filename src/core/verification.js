@@ -5,6 +5,7 @@ const { convertToKHR, verifyAmount } = require('../utils/currency');
 const { validateTransactionDate, createFraudAlertRecord, determineSeverity } = require('./fraud-detector');
 const { analyzePaymentScreenshot } = require('./ocr-engine');
 const NameIntelligenceService = require('../services/name-intelligence');
+const { FRAUD_TYPES } = require('./fraud-types');
 
 // Initialize name intelligence service
 const nameIntelligence = new NameIntelligenceService();
@@ -364,12 +365,12 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
       if (existingPayment && existingPayment.verificationStatus !== 'rejected') {
         result.verification.status = 'rejected';
-        result.verification.rejectionReason = 'DUPLICATE_TRANSACTION';
+        result.verification.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
         result.verification.paymentLabel = 'UNPAID';
         result.verification.userMessage = USER_MESSAGES.DUPLICATE_TRANSACTION;
 
         result.fraud = createFraudAlertRecord({
-          fraudType: 'DUPLICATE_TRANSACTION',
+          fraudType: FRAUD_TYPES.DUPLICATE_TRANSACTION,
           severity: 'CRITICAL',
           invoiceId: options.invoiceId,
           transactionId: extractedTrxId,
@@ -392,7 +393,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   // ====== STAGE 1: Is it a bank statement? ======
   if (ocrResult.isBankStatement === false) {
     result.verification.status = 'rejected';
-    result.verification.rejectionReason = 'NOT_BANK_STATEMENT';
+    result.verification.rejectionReason = FRAUD_TYPES.NOT_BANK_STATEMENT;
     result.verification.paymentLabel = 'UNPAID';
     result.verification.userMessage = USER_MESSAGES.NOT_BANK_STATEMENT;
     console.log(`Stage 1: NOT a bank statement | Record ${recordId}`);
@@ -404,7 +405,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   if (ocrResult.confidence === 'low' ||
       (ocrResult.confidence === 'medium' && !hasAllCriticalFields(ocrResult))) {
     result.verification.status = 'pending';
-    result.verification.rejectionReason = 'BLURRY';
+    result.verification.rejectionReason = FRAUD_TYPES.BLURRY;
     result.verification.paymentLabel = 'PENDING';
     result.verification.userMessage = USER_MESSAGES.BLURRY;
     const missing = [];
@@ -470,7 +471,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   // Only reject if definitively failed (not requiring GPT judgment)
   if (!recipientCheck.skipped && recipientCheck.verified === false && !recipientCheck.requiresGPT) {
     result.verification.status = 'rejected';
-    result.verification.rejectionReason = 'WRONG_RECIPIENT';
+    result.verification.rejectionReason = FRAUD_TYPES.WRONG_RECIPIENT;
     result.verification.paymentLabel = 'UNPAID';
     result.verification.userMessage = USER_MESSAGES.WRONG_RECIPIENT;
     console.log(`Stage 3a: Wrong recipient | Record ${recordId} | Type: ${recipientCheck.matchType} | Confidence: ${recipientCheck.confidence}% | ${recipientCheck.reason}`);
@@ -488,7 +489,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   if (ocrResult.transactionDate) {
     const dateValidation = validateTransactionDate(ocrResult.transactionDate, uploadedAt, maxAgeDays);
     result.validation.dateValidation = dateValidation;
-    result.validation.isOldScreenshot = !dateValidation.isValid && dateValidation.fraudType === 'OLD_SCREENSHOT';
+    result.validation.isOldScreenshot = !dateValidation.isValid && dateValidation.fraudType === FRAUD_TYPES.OLD_SCREENSHOT;
 
     if (!dateValidation.isValid) {
       result.verification.status = 'rejected';
@@ -538,7 +539,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
     if (!amountCheck.match) {
       result.verification.status = 'pending';
-      result.verification.rejectionReason = 'AMOUNT_MISMATCH';
+      result.verification.rejectionReason = FRAUD_TYPES.AMOUNT_MISMATCH;
       result.verification.paymentLabel = 'PENDING';
       result.verification.userMessage = USER_MESSAGES.AMOUNT_MISMATCH;
       console.log(`Stage 3d: Amount mismatch | Record ${recordId} | Expected: ${expected.amount}, Got: ${amountInKHR}`);
@@ -555,7 +556,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
     // For now, mark as pending - full GPT judge implementation would go here
     result.verification.status = 'pending';
-    result.verification.rejectionReason = 'REQUIRES_GPT_JUDGMENT';
+    result.verification.rejectionReason = FRAUD_TYPES.REQUIRES_GPT_JUDGMENT;
     result.verification.paymentLabel = 'PENDING';
     result.verification.userMessage = USER_MESSAGES.REQUIRES_GPT_JUDGMENT;
     console.log(`Stage 4: Marked for manual review/GPT judgment | Record ${recordId} | Reason: ${result.verification.gptJudgmentReason}`);
@@ -569,7 +570,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   // review so the merchant confirms the payment went to the right place.
   if (recipientUnverifiable) {
     result.verification.status = 'pending';
-    result.verification.rejectionReason = 'RECIPIENT_UNVERIFIABLE';
+    result.verification.rejectionReason = FRAUD_TYPES.RECIPIENT_UNVERIFIABLE;
     result.verification.paymentLabel = 'PENDING';
     result.verification.userMessage = USER_MESSAGES.RECIPIENT_UNVERIFIABLE;
     console.log(`MANUAL REVIEW (recipient unverifiable) | Record ${recordId} | Amount: ${amountInKHR} KHR`);

@@ -9,7 +9,6 @@ const PaymentDataParser = require('../services/payment-parser');
 const ImageEnhancerService = require('../services/image-enhancer');
 const MultiOCROrchestrator = require('../services/multi-ocr-orchestrator');
 const claudeOcr = require('../services/claude-ocr');
-const BankTemplateMatcher = require('../services/bank-template-matcher');
 
 // Initialize services
 let openai = null;
@@ -27,7 +26,7 @@ const paddleOCR = new PaddleOCRService();
 const paymentParser = new PaymentDataParser();
 const imageEnhancer = new ImageEnhancerService();
 const multiOCROrchestrator = new MultiOCROrchestrator();
-const bankTemplateMatcher = new BankTemplateMatcher();
+const bankTemplateMatcher = multiOCROrchestrator.templateMatcher;
 
 const BANK_CODE_TO_NAME = {
   ABA: 'ABA Bank',

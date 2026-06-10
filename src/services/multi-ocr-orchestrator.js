@@ -18,7 +18,7 @@ class MultiOCROrchestrator {
     this.initializationPromise = null;
 
     this.config = {
-      easyocrUrl: 'http://localhost:8867',
+      easyocrUrl: process.env.EASYOCR_URL || 'http://localhost:8867',
       openaiApiKey: process.env.OPENAI_API_KEY,
 
       // Confidence weights for different engines
@@ -40,9 +40,6 @@ class MultiOCROrchestrator {
       useOpenAIForKhmer: true,
       maxRetries: 2
     };
-
-    // Initialize Tesseract on startup
-    this.initializeTesseract();
 
     this.stats = {
       totalRequests: 0,
@@ -388,7 +385,7 @@ class MultiOCROrchestrator {
       const imageBase64 = imageBuffer.toString('base64');
 
       const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: 'gpt-4-vision-preview',
+        model: 'gpt-4o',
         messages: [{
           role: 'user',
           content: [
@@ -414,7 +411,18 @@ class MultiOCROrchestrator {
       });
 
       const content = response.data.choices[0].message.content;
-      const result = JSON.parse(content);
+      let result;
+      try {
+        result = JSON.parse(content);
+      } catch (parseError) {
+        console.error('OpenAI Vision JSON parse error:', parseError.message);
+        return {
+          text: content || '',
+          confidence: 0,
+          error: `JSON parse failed: ${parseError.message}`,
+          engine: 'OpenAI-Vision'
+        };
+      }
 
       this.stats.engineUsage.openai++;
 

@@ -263,7 +263,9 @@ class PaddleOCRService {
     }
 
     try {
-      const response = await axios.get(`${this.serviceUrl}/health`, { timeout: 5000 });
+      // Extract base URL from the predict service URL
+      const baseUrl = this.serviceUrl.substring(0, this.serviceUrl.lastIndexOf('/'));
+      const response = await axios.get(`${baseUrl}/health`, { timeout: 5000 });
       return response.status === 200;
     } catch (error) {
       console.warn('PaddleOCR service health check failed:', error.message);

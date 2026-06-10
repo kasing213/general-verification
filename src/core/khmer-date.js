@@ -92,20 +92,6 @@ const MONTH_LOOKUP = {
 const MONTH_KEYS_SORTED = Object.keys(MONTH_LOOKUP)
   .sort((a, b) => b.length - a.length);
 
-/**
- * Converts Khmer numerals to Arabic numerals (kept for backward compat)
- * @param {string} str - String containing Khmer numerals
- * @returns {string} - String with Arabic numerals
- */
-function convertKhmerNumerals(str) {
-  if (!str) return str;
-  let result = str;
-  for (const [khmer, arabic] of Object.entries(KHMER_NUMERALS)) {
-    result = result.replace(new RegExp(khmer, 'g'), arabic);
-  }
-  return result;
-}
-
 // Regex that matches a sequence of digits in EITHER Arabic (0-9) or Khmer (០-៉)
 const DIGIT_PATTERN = /[\d\u17E0-\u17E9]+/g;
 
@@ -312,7 +298,6 @@ function parseKhmerDate(dateStr) {
 
 module.exports = {
   parseKhmerDate,
-  convertKhmerNumerals,
   extractNumbers,
   findMonth,
   KHMER_NUMERALS,

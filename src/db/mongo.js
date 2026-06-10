@@ -16,6 +16,9 @@ let db = null;
 let shareClient = null;
 let shareDb = null;
 
+// Guard so reconnects skip the createIndex calls
+let indexesEnsured = false;
+
 // Collections
 let invoicesCollection = null;
 let paymentsCollection = null;
@@ -84,39 +87,44 @@ async function connect() {
  * Create database indexes
  */
 async function createIndexes() {
+  if (indexesEnsured) return;
+
   try {
-    // Invoices indexes
-    await invoicesCollection.createIndex({ customer_id: 1 });
-    await invoicesCollection.createIndex({ status: 1 });
-    await invoicesCollection.createIndex({ created_at: -1 });
+    await Promise.all([
+      // Invoices indexes
+      invoicesCollection.createIndex({ customer_id: 1 }),
+      invoicesCollection.createIndex({ status: 1 }),
+      invoicesCollection.createIndex({ created_at: -1 }),
 
-    // Payments indexes
-    await paymentsCollection.createIndex({ invoice_id: 1 });
-    await paymentsCollection.createIndex({ customer_id: 1 });
-    await paymentsCollection.createIndex({ merchant_id: 1 });
-    await paymentsCollection.createIndex({ transactionId: 1 }, { unique: true, sparse: true });
-    await paymentsCollection.createIndex({ verificationStatus: 1 });
-    await paymentsCollection.createIndex({ uploadedAt: -1 });
+      // Payments indexes
+      paymentsCollection.createIndex({ invoice_id: 1 }),
+      paymentsCollection.createIndex({ customer_id: 1 }),
+      paymentsCollection.createIndex({ merchant_id: 1 }),
+      paymentsCollection.createIndex({ transactionId: 1 }, { unique: true, sparse: true }),
+      paymentsCollection.createIndex({ verificationStatus: 1 }),
+      paymentsCollection.createIndex({ uploadedAt: -1 }),
 
-    // Fraud alerts indexes
-    await fraudAlertsCollection.createIndex({ alertId: 1 }, { unique: true });
-    await fraudAlertsCollection.createIndex({ payment_id: 1 });
-    await fraudAlertsCollection.createIndex({ invoice_id: 1 });
-    await fraudAlertsCollection.createIndex({ reviewStatus: 1 });
-    await fraudAlertsCollection.createIndex({ detectedAt: -1 });
+      // Fraud alerts indexes
+      fraudAlertsCollection.createIndex({ alertId: 1 }, { unique: true }),
+      fraudAlertsCollection.createIndex({ payment_id: 1 }),
+      fraudAlertsCollection.createIndex({ invoice_id: 1 }),
+      fraudAlertsCollection.createIndex({ reviewStatus: 1 }),
+      fraudAlertsCollection.createIndex({ detectedAt: -1 }),
 
-    // Audit logs indexes
-    await auditLogsCollection.createIndex({ payment_id: 1 });
-    await auditLogsCollection.createIndex({ merchant_id: 1 });
-    await auditLogsCollection.createIndex({ timestamp: -1 });
-    await auditLogsCollection.createIndex({ action: 1 });
+      // Audit logs indexes
+      auditLogsCollection.createIndex({ payment_id: 1 }),
+      auditLogsCollection.createIndex({ merchant_id: 1 }),
+      auditLogsCollection.createIndex({ timestamp: -1 }),
+      auditLogsCollection.createIndex({ action: 1 }),
 
-    // Notifications indexes
-    await notificationsCollection.createIndex({ merchant_id: 1 });
-    await notificationsCollection.createIndex({ payment_id: 1 });
-    await notificationsCollection.createIndex({ status: 1 });
-    await notificationsCollection.createIndex({ created_at: -1 });
+      // Notifications indexes
+      notificationsCollection.createIndex({ merchant_id: 1 }),
+      notificationsCollection.createIndex({ payment_id: 1 }),
+      notificationsCollection.createIndex({ status: 1 }),
+      notificationsCollection.createIndex({ created_at: -1 })
+    ]);
 
+    indexesEnsured = true;
     console.log('Database indexes created');
   } catch (error) {
     console.error('Error creating indexes:', error.message);
@@ -203,7 +211,10 @@ const payments = {
   },
 
   async findByTransactionId(transactionId) {
-    return paymentsCollection.findOne({ transactionId });
+    return paymentsCollection.findOne(
+      { transactionId },
+      { projection: { _id: 1, verificationStatus: 1, merchant_id: 1 } }
+    );
   },
 
   async findByInvoiceId(invoiceId) {
