@@ -225,11 +225,20 @@ function adminAuth(req, res, next) {
     // Check if merchant has admin privileges
     // TODO: replace with DB-backed is_admin check (e.g. SELECT is_admin FROM merchants WHERE id = ?)
     // Deny by default — merchant_id string content MUST NOT grant admin.
-    return res.status(403).json({
-      success: false,
-      error: 'Admin access required',
-      message: 'This operation requires administrator privileges'
-    });
+    const adminMerchantIds = (process.env.ADMIN_MERCHANT_IDS || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (!adminMerchantIds.includes(req.merchant?.id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required',
+        message: 'This operation requires administrator privileges'
+      });
+    }
+
+    next();
   });
 }
 

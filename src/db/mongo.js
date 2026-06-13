@@ -361,6 +361,16 @@ const screenshots = {
   },
 
   /**
+   * Open a GridFS download stream for a screenshot (caller pipes to res)
+   * @param {string} fileId - GridFS file ID
+   * @returns {GridFSBucketReadStream}
+   */
+  getDownloadStream(fileId) {
+    const { ObjectId } = require('mongodb');
+    return screenshotsBucket.openDownloadStream(new ObjectId(fileId));
+  },
+
+  /**
    * List files by metadata
    * @param {object} filter - Metadata filter
    * @returns {Promise<array>} - List of files

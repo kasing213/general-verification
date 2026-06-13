@@ -265,12 +265,21 @@ router.get('/payment/:id/image', merchantAuth, merchantAccessControl, async (req
       });
     }
 
-    const imageBuffer = await screenshots.download(payment.screenshotId);
-
     res.set('Content-Type', 'image/jpeg');
     res.set('Content-Disposition', `inline; filename="${paymentId}.jpg"`);
     res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-    res.send(imageBuffer);
+
+    const stream = screenshots.getDownloadStream(payment.screenshotId);
+    stream.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(404).json({
+          success: false,
+          error: 'Screenshot not found',
+          message: 'Screenshot file could not be retrieved'
+        });
+      }
+    });
+    stream.pipe(res);
 
   } catch (error) {
     console.error('Error getting payment screenshot:', error);

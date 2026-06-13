@@ -418,11 +418,20 @@ router.get('/:id/image', apiKeyAuth, async (req, res) => {
       });
     }
 
-    const imageBuffer = await screenshots.download(payment.screenshotId);
-
     res.set('Content-Type', 'image/jpeg');
     res.set('Content-Disposition', `inline; filename="${req.params.id}.jpg"`);
-    res.send(imageBuffer);
+
+    const stream = screenshots.getDownloadStream(payment.screenshotId);
+    stream.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(404).json({
+          success: false,
+          error: 'Not found',
+          message: 'Screenshot file could not be retrieved'
+        });
+      }
+    });
+    stream.pipe(res);
 
   } catch (error) {
     console.error('Error fetching screenshot:', error);

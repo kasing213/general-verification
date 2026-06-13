@@ -60,30 +60,22 @@ function learningApiAuth(req, res, next) {
 }
 
 /**
- * Optional: Relaxed auth for internal Railway communication
- * Use this if services are on internal Railway network
+ * Service-to-service Authentication Middleware
+ * Validates API key for internal service communication
  */
 function internalServiceAuth(req, res, next) {
   const apiKey = req.headers['x-api-key'];
-  const origin = req.headers['origin'] || req.headers['referer'];
 
   // If API key is provided, validate it
   if (apiKey) {
     return learningApiAuth(req, res, next);
   }
 
-  // Check if request comes from Railway internal network
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded && forwarded.includes('railway.internal')) {
-    console.log(`🚂 Railway internal network access detected`);
-    return next();
-  }
-
   // Default to requiring API key
   return res.status(401).json({
     success: false,
     error: 'Authentication required',
-    message: 'API key required or internal service authentication failed',
+    message: 'API key required',
     hint: 'Add X-API-Key header with the OCR service API key'
   });
 }
