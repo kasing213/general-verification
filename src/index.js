@@ -137,7 +137,7 @@ io.use(async (socket, next) => {
 
     // Verify merchant token
     const jwt = require('jsonwebtoken');
-    const JWT_SECRET = process.env.JWT_SECRET;
+    const JWT_SECRET = process.env.JWT_SECRET || process.env.SERVICE_JWT_SECRET;
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
@@ -243,8 +243,13 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     // Validate required environment variables
-    const requiredEnvVars = ['OPENAI_API_KEY', 'MONGO_URL', 'API_KEY', 'JWT_SECRET'];
+    const requiredEnvVars = ['OPENAI_API_KEY', 'MONGO_URL', 'API_KEY'];
     const missing = requiredEnvVars.filter(v => !process.env[v]);
+
+    // JWT secret may be supplied under either name (see merchant-auth.js).
+    if (!process.env.JWT_SECRET && !process.env.SERVICE_JWT_SECRET) {
+      missing.push('JWT_SECRET (or SERVICE_JWT_SECRET)');
+    }
 
     if (missing.length > 0) {
       console.error(`Missing required environment variables: ${missing.join(', ')}`);

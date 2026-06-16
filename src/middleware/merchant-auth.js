@@ -7,11 +7,14 @@
 
 const jwt = require('jsonwebtoken');
 
-if (!process.env.JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable is required but not set');
+// Accept the platform-canonical SERVICE_JWT_SECRET as a fallback so this
+// service interoperates with facebook-automation / api-gateway, which name
+// the same secret SERVICE_JWT_SECRET (falling back to MASTER_SECRET_KEY).
+if (!process.env.JWT_SECRET && !process.env.SERVICE_JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET (or SERVICE_JWT_SECRET) environment variable is required but not set');
   process.exit(1);
 }
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SERVICE_JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
 /**
