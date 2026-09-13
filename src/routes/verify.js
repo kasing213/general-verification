@@ -317,6 +317,8 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       extracted_data: {
         amount: formatAmount(result.payment.amount, result.payment.currency),
         currency: result.payment.currency || "",
+        amount_text: result.payment.amountText || null,
+        currency_symbol: result.payment.currencySymbol || null,
         date: formatDate(result.payment.transactionDate),
         reference: result.payment.referenceNumber || result.payment.transactionId || "N/A",
         account: result.payment.toAccount || "N/A",

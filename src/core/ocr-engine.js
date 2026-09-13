@@ -827,6 +827,8 @@ function adaptClaudeResult(claudeRaw, processingTime) {
     confidence: claudeRaw.confidence || 'low',
     amount: claudeRaw.amount,
     currency: claudeRaw.currency,
+    amountText: claudeRaw.amountText || null,
+    currencySymbol: claudeRaw.currencySymbol || null,
     transactionId,
     referenceNumber: claudeRaw.referenceNumber || null,
     fromAccount: claudeRaw.fromAccount || null,
@@ -858,7 +860,12 @@ function logExtractedFields(engine, data) {
   console.log(`📋 [${engine}] Extracted fields:`);
   console.log(`   isBankStatement: ${present(data.isBankStatement)} | isPaid: ${present(data.isPaid)} | confidence: ${present(data.confidence)}`);
   console.log(`   bankName:        ${present(data.bankName)}`);
-  console.log(`   amount:          ${present(data.amount)} ${present(data.currency)}`);
+  console.log(
+    `   amount:          ${present(data.amount)} ${present(data.currency)}` +
+    (data.amountText || data.currencySymbol
+      ? ` (source: ${present(data.amountText)}, symbol: ${present(data.currencySymbol)})`
+      : '')
+  );
   console.log(`   transactionId:   ${present(data.transactionId)}`);
   console.log(`   referenceNumber: ${present(data.referenceNumber)}`);
   console.log(`   toAccount:       ${present(data.toAccount)}`);

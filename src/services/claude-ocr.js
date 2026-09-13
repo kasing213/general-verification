@@ -39,6 +39,43 @@ function isAvailable() {
   return !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY);
 }
 
+function currencyFromEvidence(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (text.includes('៛') || /KHR|រៀល/i.test(text)) return 'KHR';
+  if (text.includes('$') || /USD|ដុល្លារ/i.test(text)) return 'USD';
+  return null;
+}
+
+function normalizeAmountResult(result = {}) {
+  const amountText = typeof result.amountText === 'string' && result.amountText.trim()
+    ? result.amountText
+    : null;
+  const currencySymbol = typeof result.currencySymbol === 'string' && result.currencySymbol.trim()
+    ? result.currencySymbol
+    : null;
+  const statedCurrency = typeof result.currency === 'string'
+    ? result.currency.trim().toUpperCase()
+    : null;
+
+  // Literal evidence copied from beside the selected header amount wins over
+  // a contradictory normalized label. The old JSON shape discarded this on
+  // dual-currency receipts, leaving downstream verification unable to repair
+  // a model guess such as `៛10,000` -> `10000 USD`.
+  const evidenceCurrency = currencyFromEvidence(currencySymbol)
+    || currencyFromEvidence(amountText);
+
+  return {
+    amount: typeof result.amount === 'number' ? result.amount : null,
+    currency: evidenceCurrency
+      || (statedCurrency === 'KHR' || statedCurrency === 'USD' ? statedCurrency : null),
+    amountText,
+    currencySymbol
+  };
+}
+
 // ── Prompts ─────────────────────────────────────────────────────────
 //
 // Generic by design: every example is a format placeholder, not a real
@@ -70,15 +107,19 @@ TASK: Find the LARGE/HEADER transfer amount and its currency.
 RULES:
 - Read the MAIN amount — the largest, most prominent number on screen (usually colored/highlighted near the top).
 - Return the NUMBER displayed, without commas. "26,000 ៛" → 26000. "1,200,000" → 1200000.
+- Copy the selected amount exactly into amountText, including its adjacent currency symbol/code.
+- Copy ONLY that adjacent symbol/code into currencySymbol (for example "៛", "$", "KHR", or "USD").
 - "៛" or "រៀល" → currency "KHR".
 - "$" or "ដុល្លារ" or "USD" → currency "USD".
-- If BOTH USD and KHR are shown, use the KHR amount (it is the actual Cambodian transfer value).
+- If both USD and KHR appear, select the currency immediately adjacent to the LARGE/HEADER transfer amount. Do not prefer either currency globally.
+- Ignore secondary rows labeled "Debit Amount", "Converted Amount", "Equivalent", "Fees", or "Charges". They are not the transfer amount.
+- Example: a header reading "៛10,000" plus a lower row reading "Debit Amount 2.47 USD" means amount=10000, currency=KHR, amountText="៛10,000", currencySymbol="៛".
 - NEVER multiply, divide, or convert between currencies. NEVER calculate from an exchange rate.
 - If the amount has a minus sign (e.g. "-26,000 KHR" on ABA), return the POSITIVE value: 26000.
 - If you cannot find a clear amount, return null for amount.
 
 Output JSON only:
-{"amount": number or null, "currency": "KHR" or "USD" or null}`;
+{"amount": number or null, "currency": "KHR" or "USD" or null, "amountText": "exact selected amount text or null", "currencySymbol": "exact adjacent symbol/code or null"}`;
 
 const PROMPT_META = `You are extracting reference and identity fields from a Cambodian bank screenshot.
 
@@ -182,7 +223,7 @@ async function extractWithClaude(imageInput, options = {}) {
     }),
     callAgent('AMOUNT', PROMPT_AMOUNT, base64Image, mediaType).catch(err => {
       console.error(`❌ [OCR-CLAUDE/AMOUNT] ${err.message}`);
-      return { amount: null, currency: null };
+      return { amount: null, currency: null, amountText: null, currencySymbol: null };
     }),
     callAgent('META', PROMPT_META, base64Image, mediaType).catch(err => {
       console.error(`❌ [OCR-CLAUDE/META] ${err.message}`);
@@ -199,13 +240,16 @@ async function extractWithClaude(imageInput, options = {}) {
   ]);
 
   const elapsed = Date.now() - started;
+  const normalizedAmount = normalizeAmountResult(amountResult);
 
   const paymentData = {
     isBankStatement: metaResult.isBankStatement === true,
     isPaid: metaResult.isPaid === true,
     confidence: metaResult.confidence || 'low',
-    amount: typeof amountResult.amount === 'number' ? amountResult.amount : null,
-    currency: amountResult.currency || null,
+    amount: normalizedAmount.amount,
+    currency: normalizedAmount.currency,
+    amountText: normalizedAmount.amountText,
+    currencySymbol: normalizedAmount.currencySymbol,
     transactionId: metaResult.transactionId || null,
     referenceNumber: null,
     fromAccount: null,
@@ -225,5 +269,13 @@ module.exports = {
   extractWithClaude,
   isAvailable,
   // exported for testing
-  _internals: { callAgent, PROMPT_DATE, PROMPT_AMOUNT, PROMPT_META, MODEL }
+  _internals: {
+    callAgent,
+    currencyFromEvidence,
+    normalizeAmountResult,
+    PROMPT_DATE,
+    PROMPT_AMOUNT,
+    PROMPT_META,
+    MODEL
+  }
 };

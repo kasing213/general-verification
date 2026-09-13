@@ -310,6 +310,8 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     payment: {
       amount: ocrResult.amount || null,
       currency: ocrResult.currency || null,
+      amountText: ocrResult.amountText || null,
+      currencySymbol: ocrResult.currencySymbol || null,
       transactionId: ocrResult.transactionId || null,
       transactionDate: ocrResult.transactionDate || null,
       fromAccount: ocrResult.fromAccount || null,
