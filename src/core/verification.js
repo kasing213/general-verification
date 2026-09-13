@@ -588,21 +588,64 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     // Note: We don't reject on bank mismatch, just record it
   }
 
-  // 3d: Amount verification (normalize before converting)
+  // 3d: Amount verification
+  //
+  // BOTH sides convert to KHR before comparing. Only the extracted side used
+  // to be converted, while `expected.amount` was passed straight from the
+  // invoice in the invoice's own currency, so a $2.50 invoice was compared as
+  // 2.5 against 10000 and EVERY USD invoice failed the amount check no matter
+  // what the customer paid. KHR invoices happened to work, which is how it
+  // went unnoticed. verifyAmount's own docstring says both sides are KHR.
   const normalizedOcrAmount = normalizeAmount(ocrResult.amount);
-  const amountInKHR = convertToKHR(normalizedOcrAmount, ocrResult.currency);
-  result.validation.amount.actual = amountInKHR;
+
+  // An extractor that could not see a currency symbol should say so rather
+  // than guess. When it does, bill in the invoice's currency: that is the
+  // merchant's own account currency and the one being charged.
+  const currencyAssumed = !ocrResult.currency;
+  const paidCurrency = ocrResult.currency || expected.currency || 'KHR';
+
+  const amountInKHR = convertToKHR(normalizedOcrAmount, paidCurrency);
+  const expectedInKHR = convertToKHR(expected.amount, expected.currency);
+
+  // Report both sides AS READ, with their units. "invoice 2.5, screenshot
+  // 40000000" told the merchant nothing; showing "2.5 USD" against
+  // "10000 USD" is what makes a misread currency visible at a glance.
+  result.validation.amount.actual = normalizedOcrAmount;
+  result.validation.amount.actualCurrency = paidCurrency;
+  result.validation.amount.expectedCurrency = expected.currency || 'KHR';
+  result.validation.amount.actualKHR = amountInKHR;
+  result.validation.amount.expectedKHR = expectedInKHR;
+  if (currencyAssumed) result.validation.amount.currencyAssumed = true;
 
   if (expected.amount) {
-    const amountCheck = verifyAmount(expected.amount, amountInKHR, expected.tolerancePercent);
+    const amountCheck = verifyAmount(expectedInKHR, amountInKHR, expected.tolerancePercent);
     result.validation.amount.match = amountCheck.match;
+
+    // The number is right but the currency label may not be: the same digits
+    // match once reinterpreted in the other currency. Never auto-accepted -
+    // 10,000 KHR against a $10,000 invoice must not clear - but the merchant
+    // reviewing this is told what we noticed.
+    if (!amountCheck.match && ocrResult.currency) {
+      const flipped = paidCurrency.toUpperCase() === 'USD' ? 'KHR' : 'USD';
+      if (verifyAmount(expectedInKHR, convertToKHR(normalizedOcrAmount, flipped),
+                       expected.tolerancePercent).match) {
+        result.validation.amount.currencySuspect = true;
+        result.validation.amount.currencyIfFlipped = flipped;
+      }
+    }
 
     if (!amountCheck.match) {
       result.verification.status = 'pending';
       result.verification.rejectionReason = FRAUD_TYPES.AMOUNT_MISMATCH;
       result.verification.paymentLabel = 'PENDING';
       result.verification.userMessage = USER_MESSAGES.AMOUNT_MISMATCH;
-      console.log(`Stage 3d: Amount mismatch | Record ${recordId} | Expected: ${expected.amount}, Got: ${amountInKHR}`);
+      console.log(
+        `Stage 3d amount=fail record=${recordId} ` +
+        `expected=${expected.amount} ${expected.currency || 'KHR'} (${expectedInKHR} KHR) ` +
+        `read=${normalizedOcrAmount} ${paidCurrency}${currencyAssumed ? ' (assumed)' : ''} (${amountInKHR} KHR)` +
+        (result.validation.amount.currencySuspect
+          ? ` currency_suspect=would_match_as_${result.validation.amount.currencyIfFlipped}` : '')
+      );
       return result;
     }
   } else {
