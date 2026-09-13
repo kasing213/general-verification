@@ -210,10 +210,20 @@ const payments = {
     return paymentsCollection.findOne({ _id: id });
   },
 
+  // Projection is wide enough to LIST OUT the original payment to the
+  // merchant ("already used on INV-0031, 20,000 KHR, 12 Sep"). It used to
+  // return only {_id, verificationStatus, merchant_id}, so a duplicate could
+  // be detected but never explained. Same indexed lookup, no extra query.
   async findByTransactionId(transactionId) {
     return paymentsCollection.findOne(
       { transactionId },
-      { projection: { _id: 1, verificationStatus: 1, merchant_id: 1 } }
+      {
+        projection: {
+          _id: 1, verificationStatus: 1, merchant_id: 1,
+          invoice_id: 1, amount: 1, currency: 1,
+          transactionDate: 1, uploadedAt: 1
+        }
+      }
     );
   },
 

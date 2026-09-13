@@ -60,35 +60,47 @@ describe('parseKhmerDate', () => {
     expect(d.getFullYear()).toBeLessThan(1900);
   });
 
+// A receipt date is a CALENDAR DATE in the bank's timezone (Asia/Phnom_Penh).
+// Asserting it with host-local getters is what let the timezone bug through:
+// on a Cambodia-time laptop the old parser looked right, and only the UTC
+// production host showed it was seven hours out. Shift into bank time and use
+// the UTC getters, so these assertions mean the same thing on every machine.
+const BANK_OFFSET_MS = 7 * 60 * 60 * 1000;
+const inBankTz = (d) => new Date(d.getTime() + BANK_OFFSET_MS);
+
   test('parses an ISO date string', () => {
     const d = parseKhmerDate('2025-03-18');
     expect(d).toBeInstanceOf(Date);
-    expect(d.getUTCFullYear()).toBe(2025);
-    expect(d.getUTCMonth()).toBe(2); // March (0-indexed)
-    expect(d.getUTCDate()).toBe(18);
+    const b = inBankTz(d);
+    expect(b.getUTCFullYear()).toBe(2025);
+    expect(b.getUTCMonth()).toBe(2); // March (0-indexed)
+    expect(b.getUTCDate()).toBe(18);
   });
 
   test('parses an English "DD Month YYYY" string', () => {
     const d = parseKhmerDate('18 April 2025');
     expect(d).toBeInstanceOf(Date);
-    expect(d.getFullYear()).toBe(2025);
-    expect(d.getMonth()).toBe(3); // April
-    expect(d.getDate()).toBe(18);
+    const b = inBankTz(d);
+    expect(b.getUTCFullYear()).toBe(2025);
+    expect(b.getUTCMonth()).toBe(3); // April
+    expect(b.getUTCDate()).toBe(18);
   });
 
   test('parses a Khmer-script date with Khmer numerals', () => {
     const d = parseKhmerDate(`${KH_18} ${KH_APRIL} ${KH_2025}`);
     expect(d).toBeInstanceOf(Date);
-    expect(d.getFullYear()).toBe(2025);
-    expect(d.getMonth()).toBe(3); // មេសា = April
-    expect(d.getDate()).toBe(18);
+    const b = inBankTz(d);
+    expect(b.getUTCFullYear()).toBe(2025);
+    expect(b.getUTCMonth()).toBe(3); // មេសា = April
+    expect(b.getUTCDate()).toBe(18);
   });
 
   test('parses a DD/MM/YYYY string via the separator fallback', () => {
     const d = parseKhmerDate('18/04/2025');
     expect(d).toBeInstanceOf(Date);
-    expect(d.getFullYear()).toBe(2025);
-    expect(d.getMonth()).toBe(3); // 04 = April, day/month not swapped
-    expect(d.getDate()).toBe(18);
+    const b = inBankTz(d);
+    expect(b.getUTCFullYear()).toBe(2025);
+    expect(b.getUTCMonth()).toBe(3); // 04 = April, day/month not swapped
+    expect(b.getUTCDate()).toBe(18);
   });
 });

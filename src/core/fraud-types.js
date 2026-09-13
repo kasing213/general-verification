@@ -24,6 +24,14 @@ const FRAUD_TYPES = Object.freeze({
   AMOUNT_MISMATCH:          'AMOUNT_MISMATCH',
   REQUIRES_GPT_JUDGMENT:    'REQUIRES_GPT_JUDGMENT',
   RECIPIENT_UNVERIFIABLE:   'RECIPIENT_UNVERIFIABLE',
+
+  // A duplicate whose original belongs to a DIFFERENT merchant. Split from
+  // DUPLICATE_TRANSACTION because the two mean opposite things: the same shop
+  // seeing a receipt twice is usually a customer resending it, while another
+  // shop's receipt turning up here is the shape of receipt reuse. Downstream
+  // also withholds the original's details for this one - the transactionId
+  // index is global, so the original can belong to another tenant.
+  DUPLICATE_TRANSACTION_OTHER_ACCOUNT: 'DUPLICATE_TRANSACTION_OTHER_ACCOUNT',
 });
 
 module.exports = { FRAUD_TYPES };

@@ -169,9 +169,20 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
     }
 
     // Run verification pipeline (pass buffer directly)
+    // Hoisted above verifyPayment: the duplicate pre-check needs to know WHOSE
+    // payment it collided with, because the unique index on transactionId is
+    // global and a hit can point at another merchant entirely.
+    //
+    // Callers that do not send merchant_id fall back to customerId, which is
+    // what every historical row stored here. Those rows will not match a real
+    // tenant id, so they fall through to the "other merchant" branch - the
+    // detail-free one. Wrong but safe: it never leaks, it only under-shares.
+    const merchantId = req.body.merchant_id || customerId || 'default';
+
     const result = await verifyPayment(imageBuffer, expectedPayment, {
       invoiceId,
-      customerId
+      customerId,
+      merchantId
     });
 
     // Upload screenshot to GridFS
@@ -184,9 +195,6 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
     });
 
     result.screenshotId = screenshotId;
-
-    // Get merchant_id from request (for audit interface)
-    const merchantId = req.body.merchant_id || customerId || 'default';
 
     // Save payment record to database
     const paymentRecord = {
@@ -239,16 +247,22 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
       // Handle MongoDB E11000 duplicate key error on transactionId unique sparse index
       // This catches race conditions where two identical screenshots are processed simultaneously
       if (err.code === 11000 && err.keyPattern && err.keyPattern.transactionId) {
-        result.verification.status = 'rejected';
-        result.verification.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
-        result.verification.paymentLabel = 'UNPAID';
-        console.log(`E11000: Duplicate transactionId on insert | Record ${result.recordId} | Trx: ${paymentRecord.transactionId}`);
+        // Same treatment as the pre-check: a duplicate is the merchant's call,
+        // not an auto-refusal. This is the race where two identical
+        // screenshots are processed at once, so we cannot say whose the
+        // original is without another query - no details are offered, which
+        // is also the safe answer if it belongs to a different tenant.
+        result.verification.status = 'pending';
+        result.verification.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT;
+        result.verification.paymentLabel = 'PENDING';
+        result.verification.duplicateOf = { scope: 'other_merchant' };
+        console.log(`E11000 duplicate=1 scope=unknown verdict=pending record=${result.recordId} trx=${paymentRecord.transactionId}`);
 
         // Still save with transactionId removed so the record is preserved for audit
         delete paymentRecord.transactionId;
-        paymentRecord.verificationStatus = 'rejected';
-        paymentRecord.paymentLabel = 'UNPAID';
-        paymentRecord.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
+        paymentRecord.verificationStatus = 'pending';
+        paymentRecord.paymentLabel = 'PENDING';
+        paymentRecord.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT;
         try {
           await payments.create(paymentRecord);
         } catch (reinsertErr) {
@@ -323,6 +337,11 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
         // falls back to the raw enum ("RECIPIENT_UNVERIFIABLE"). Forward it.
         userMessage: result.verification.userMessage || null,
         warnings_detail: result.verification.warnings || null,
+        // The original payment this one duplicates, so the merchant can be
+        // shown WHAT it duplicates instead of just being told that it does.
+        // Already reduced to {scope:'other_merchant'} by core/verification.js
+        // when the original belongs to a different tenant.
+        duplicateOf: result.verification.duplicateOf || null,
         // Expected values from invoice (for comparison display)
         expected: {
           amount: result.validation.amount.expected,

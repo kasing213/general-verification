@@ -364,24 +364,67 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
       const existingPayment = await payments.findByTransactionId(extractedTrxId);
 
       if (existingPayment && existingPayment.verificationStatus !== 'rejected') {
-        result.verification.status = 'rejected';
-        result.verification.rejectionReason = FRAUD_TYPES.DUPLICATE_TRANSACTION;
-        result.verification.paymentLabel = 'UNPAID';
+        // Whose payment did we collide with? The unique index on
+        // transactionId is GLOBAL, not per-tenant, so a hit can point at
+        // another merchant's payment entirely. The two cases mean opposite
+        // things and are handled differently on purpose.
+        const thisMerchant = options.merchantId ? String(options.merchantId) : null;
+        const thatMerchant = existingPayment.merchant_id
+          ? String(existingPayment.merchant_id) : null;
+        const sameMerchant = Boolean(thisMerchant && thatMerchant && thisMerchant === thatMerchant);
+
+        // A duplicate is no longer an auto-rejection. The merchant decides,
+        // because the innocent explanations (customer resent the screenshot,
+        // one transfer covering two invoices) are at least as common as the
+        // guilty one, and refusing the customer outright with no human in the
+        // loop was costing real sales.
+        result.verification.status = 'pending';
+        result.verification.paymentLabel = 'PENDING';
+        result.verification.rejectionReason = sameMerchant
+          ? FRAUD_TYPES.DUPLICATE_TRANSACTION
+          : FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT;
         result.verification.userMessage = USER_MESSAGES.DUPLICATE_TRANSACTION;
 
+        // Details are attached ONLY for our own merchant. Handing back another
+        // tenant's invoice number or amount would leak it into this
+        // merchant's Telegram and dashboard.
+        result.verification.duplicateOf = sameMerchant
+          ? {
+              scope: 'same_merchant',
+              record_id: String(existingPayment._id),
+              invoice_number: existingPayment.invoice_id || null,
+              amount: existingPayment.amount || null,
+              currency: existingPayment.currency || null,
+              transaction_date: existingPayment.transactionDate || null,
+              submitted_at: existingPayment.uploadedAt || null
+            }
+          : { scope: 'other_merchant' };
+
+        // Still recorded as a fraud alert either way - the audit trail must
+        // not get thinner just because the verdict got kinder. Severity now
+        // reflects which of the two cases it actually is.
         result.fraud = createFraudAlertRecord({
-          fraudType: FRAUD_TYPES.DUPLICATE_TRANSACTION,
-          severity: 'CRITICAL',
+          fraudType: result.verification.rejectionReason,
+          severity: sameMerchant ? 'MEDIUM' : 'CRITICAL',
           invoiceId: options.invoiceId,
           transactionId: extractedTrxId,
           amount: ocrResult.amount,
           currency: ocrResult.currency,
           bankName: ocrResult.bankName,
           confidence: ocrResult.confidence,
-          verificationNotes: `Duplicate of payment ${existingPayment._id}`
+          // The original's id identifies ANOTHER tenant's payment when this is
+          // a cross-merchant hit, and `fraud` is returned in the API response -
+          // so it stays out of the note in that case. An investigator can still
+          // find the original by transactionId, which is on this alert already.
+          verificationNotes: sameMerchant
+            ? `Duplicate of payment ${existingPayment._id} (same merchant) - held for merchant review`
+            : 'Duplicate of a payment on another account - held for merchant review'
         });
 
-        console.log(`PRE-CHECK: DUPLICATE_TRANSACTION | Trx ID: ${extractedTrxId} | Existing: ${existingPayment._id} | Record ${recordId}`);
+        console.log(
+          `PRE-CHECK duplicate=1 scope=${sameMerchant ? 'same_merchant' : 'other_merchant'} ` +
+          `verdict=pending trx=${extractedTrxId} existing=${existingPayment._id} record=${recordId}`
+        );
         return result;
       }
     } catch (err) {
@@ -492,14 +535,28 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     result.validation.isOldScreenshot = !dateValidation.isValid && dateValidation.fraudType === FRAUD_TYPES.OLD_SCREENSHOT;
 
     if (!dateValidation.isValid) {
-      result.verification.status = 'rejected';
+      // OLD_SCREENSHOT is the only date failure that still refuses outright:
+      // "older than the window" is the signature of a reused receipt, and the
+      // 7-day limit exists precisely to catch it.
+      //
+      // The other three are NOT evidence of anything. A future date is almost
+      // always a wrong clock on the customer's phone; an unparsed date is
+      // usually a Khmer format the parser does not know; a missing date is a
+      // cropped screenshot. Refusing a paying customer for those, with no
+      // human ever told, was ending real sales over a phone setting. They go
+      // to the merchant instead.
+      const refuseOutright = dateValidation.fraudType === FRAUD_TYPES.OLD_SCREENSHOT;
+
+      result.verification.status = refuseOutright ? 'rejected' : 'pending';
       result.verification.rejectionReason = dateValidation.fraudType;
-      result.verification.paymentLabel = 'UNPAID';
+      result.verification.paymentLabel = refuseOutright ? 'UNPAID' : 'PENDING';
 
       // Create fraud alert
       result.fraud = createFraudAlertRecord({
         fraudType: dateValidation.fraudType,
-        severity: determineSeverity(dateValidation.fraudType, { ageDays: dateValidation.ageDays }),
+        severity: refuseOutright
+          ? determineSeverity(dateValidation.fraudType, { ageDays: dateValidation.ageDays })
+          : 'LOW',
         invoiceId: options.invoiceId,
         customerId: options.customerId,
         transactionDate: dateValidation.parsedDate,
@@ -515,7 +572,10 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
         verificationNotes: dateValidation.reason
       });
 
-      console.log(`Stage 3b: ${dateValidation.fraudType} | Record ${recordId} | ${dateValidation.reason}`);
+      console.log(
+        `Stage 3b date=fail reason=${dateValidation.fraudType} ` +
+        `verdict=${result.verification.status} record=${recordId} detail=${dateValidation.reason}`
+      );
       return result;
     }
   }

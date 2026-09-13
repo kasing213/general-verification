@@ -4,6 +4,14 @@ const { v4: uuidv4 } = require('uuid');
 const { parseKhmerDate } = require('./khmer-date');
 const { FRAUD_TYPES } = require('./fraud-types');
 
+// How far ahead of our own clock a transaction may sit before we call it a
+// future date. Covers phone/bank clock drift and any uncertainty about the
+// receipt's timezone. Override with FUTURE_DATE_TOLERANCE_MINUTES.
+const FUTURE_TOLERANCE_MINUTES = (() => {
+  const raw = parseInt(process.env.FUTURE_DATE_TOLERANCE_MINUTES, 10);
+  return Number.isFinite(raw) ? raw : 720; // 12 hours
+})();
+
 /**
  * Validates transaction date and checks for screenshot age fraud
  * @param {string} transactionDateStr - Transaction date from OCR
@@ -50,12 +58,29 @@ function validateTransactionDate(transactionDateStr, uploadedAt, maxAgeDays = 7)
   }
 
   // Check 3: Future date detection
-  if (transactionDate > uploadedAt) {
-    const futureDays = Math.ceil((transactionDate - uploadedAt) / (1000 * 60 * 60 * 24));
+  //
+  // This used to compare with ZERO tolerance, so a transaction one millisecond
+  // ahead of the server clock was "fraud" - and Math.ceil rendered any skew
+  // under a day as the nonsensical "1 days in the future". Combined with the
+  // timezone bug in khmer-date.js it refused every customer who uploaded
+  // within seven hours of paying.
+  //
+  // The timezone is fixed at the source now, but a tolerance still belongs
+  // here: phone and bank clocks drift, and we cannot actually know the
+  // receipt's timezone for certain - a merchant or bank outside ICT would
+  // recreate the same outage. The costs are lopsided. A false FUTURE_DATE
+  // stalls a real payment; a missed one is caught by the merchant, who now
+  // reviews this case by hand anyway. So the window is generous by design,
+  // and a forged "next week" date is still well outside it.
+  const futureMs = transactionDate - uploadedAt;
+  if (futureMs > FUTURE_TOLERANCE_MINUTES * 60 * 1000) {
+    const futureHours = futureMs / (1000 * 60 * 60);
     result.isValid = false;
     result.fraudType = FRAUD_TYPES.FUTURE_DATE;
-    result.ageDays = -futureDays;
-    result.reason = `Transaction date is ${futureDays} days in the future`;
+    result.ageDays = -(futureMs / (1000 * 60 * 60 * 24));
+    result.reason = futureHours < 48
+      ? `Transaction date is ${futureHours.toFixed(1)} hours ahead of our clock`
+      : `Transaction date is ${Math.floor(futureHours / 24)} days in the future`;
     return result;
   }
 

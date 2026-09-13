@@ -235,14 +235,66 @@ function extractDayYear(text, monthIdx, matchLen) {
  * @param {string} dateStr - Date string (Khmer, English, or mixed)
  * @returns {Date|null} - Parsed Date object or null
  */
+// ---------------------------------------------------------------------------
+// Timezone
+// ---------------------------------------------------------------------------
+// A bank receipt prints LOCAL wall-clock time and carries no timezone. Every
+// Date below used to be built with the SERVER's timezone, which is UTC on
+// Railway, so an ABA receipt reading "Sep 13, 2026 02:04 PM" (14:04 in Phnom
+// Penh = 07:04 UTC) was read as 14:04 UTC - seven hours ahead of the instant
+// it actually happened. The future-date check then refused every customer who
+// paid and uploaded within seven hours, i.e. essentially all of them, while a
+// screenshot sent the next day passed. Exactly backwards.
+//
+// It never reproduced in local testing: a developer machine on Cambodia time
+// parses these correctly. Only a UTC host shows it.
+//
+// Wall-clock components are now anchored to the bank's timezone explicitly, so
+// the result is identical whatever the host is set to.
+const BANK_TZ_OFFSET_MINUTES = (() => {
+  const raw = parseInt(process.env.BANK_TZ_OFFSET_MINUTES, 10);
+  return Number.isFinite(raw) ? raw : 420; // Asia/Phnom_Penh, UTC+7
+})();
+
+/** Build the instant for a wall-clock reading in the bank's timezone. */
+function wallClockToInstant(year, monthIndex, day, hour = 0, minute = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour, minute) - BANK_TZ_OFFSET_MINUTES * 60000);
+}
+
+// A trailing "Z" or "+07:00" means the string already states its zone; trust it.
+const HAS_EXPLICIT_ZONE = /(?:Z|[+-]\d{2}:?\d{2})\s*$/i;
+// A bare "YYYY-MM-DD" is parsed as UTC midnight by the JS spec, which is a
+// different day boundary from midnight in Phnom Penh.
+const DATE_ONLY_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
 function parseKhmerDate(dateStr) {
   if (!dateStr) return null;
 
+  // Already an instant. The pipeline parses once in ocr-engine and then
+  // validateTransactionDate parses again, so this function must be idempotent.
+  // A Date stringifies to "Sun Sep 13 2026 07:04:00 GMT+0000 (...)", which has
+  // a zone but not one the regex below matches - it would be re-read as a wall
+  // clock and shifted a second time.
+  if (dateStr instanceof Date) {
+    return isNaN(dateStr.getTime()) ? null : dateStr;
+  }
+
   try {
     // Step 1: Try standard ISO parsing (works for "2025-03-18" etc.)
+    const trimmed = String(dateStr).trim();
     const isoDate = new Date(dateStr);
     if (!isNaN(isoDate.getTime())) {
-      return isoDate;
+      if (HAS_EXPLICIT_ZONE.test(trimmed)) return isoDate;
+      if (DATE_ONLY_ISO.test(trimmed)) {
+        const [y, m, d] = trimmed.split('-').map(Number);
+        return wallClockToInstant(y, m - 1, d);
+      }
+      // The local getters recover the wall-clock reading the string expressed,
+      // whatever timezone the host applied to produce it.
+      return wallClockToInstant(
+        isoDate.getFullYear(), isoDate.getMonth(), isoDate.getDate(),
+        isoDate.getHours(), isoDate.getMinutes()
+      );
     }
 
     // Step 2: Find month name in raw text (Khmer or English)
@@ -253,7 +305,7 @@ function parseKhmerDate(dateStr) {
       const dayYear = extractDayYear(dateStr, monthResult.index, monthResult.match.length);
 
       if (dayYear) {
-        const date = new Date(dayYear.year, monthResult.month - 1, dayYear.day, dayYear.hour, dayYear.minute);
+        const date = wallClockToInstant(dayYear.year, monthResult.month - 1, dayYear.day, dayYear.hour, dayYear.minute);
         if (!isNaN(date.getTime())) {
           return date;
         }
@@ -282,7 +334,7 @@ function parseKhmerDate(dateStr) {
       }
 
       if (day >= 1 && day <= 31 && monthNum >= 1 && monthNum <= 12) {
-        const date = new Date(year, monthNum - 1, day);
+        const date = wallClockToInstant(year, monthNum - 1, day);
         if (!isNaN(date.getTime())) {
           return date;
         }
