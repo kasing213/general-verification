@@ -291,7 +291,15 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
     const response = {
       success: result.success,
       record_id: result.recordId,
+      // NOTE: this number is the READ QUALITY of the screenshot (the vision
+      // model's high/medium/low legibility grade), NOT a probability that the
+      // payment is genuine. The verdict comes from the boolean gates in
+      // core/verification.js. Consumers rendered it as "Confidence: 90%" next
+      // to "Manual Review Required" and looked broken to merchants, so the
+      // scale it came from is now stated explicitly alongside it.
       confidence: confidenceToNumber(result.verification.confidence),
+      confidence_basis: 'read_quality',
+      read_quality: result.verification.confidence || 'low',
       extracted_data: {
         amount: formatAmount(result.payment.amount, result.payment.currency),
         currency: result.payment.currency || "",
@@ -309,6 +317,12 @@ router.post('/', apiKeyAuth, upload.single('image'), async (req, res) => {
           ? 'Payment verified successfully'
           : result.verification.rejectionReason || 'Manual review required',
         rejectionReason: result.verification.rejectionReason,
+        // core/verification.js sets a plain-language USER_MESSAGES string on
+        // every non-verified path, and this transform used to drop it. The
+        // only explanation that reached the customer was `message`, which
+        // falls back to the raw enum ("RECIPIENT_UNVERIFIABLE"). Forward it.
+        userMessage: result.verification.userMessage || null,
+        warnings_detail: result.verification.warnings || null,
         // Expected values from invoice (for comparison display)
         expected: {
           amount: result.validation.amount.expected,
