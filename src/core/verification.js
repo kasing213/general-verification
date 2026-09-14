@@ -51,8 +51,10 @@ function normalizeAmount(amountStr) {
  */
 function hasAllCriticalFields(ocrResult) {
   return ocrResult.amount !== null &&
+         ocrResult.amount !== undefined &&
          ocrResult.currency &&
-         (ocrResult.transactionId || ocrResult.toAccount);
+         ocrResult.recipientName &&
+         ocrResult.transactionDate;
 }
 
 /**
@@ -71,11 +73,13 @@ function normalizeAccount(account) {
  *   - isBankStatement = true → Stage 2
  *
  * Stage 2: Confidence Check
- *   - confidence = low/medium → PENDING + "send clearer image"
+ *   - confidence = low → PENDING + "send clearer image"
+ *   - confidence = medium with receiver/date/amount/currency → Stage 3
  *   - confidence = high → Stage 3
  *
- * Stage 3: Security Verification (HIGH confidence only)
- *   - Wrong recipient (intelligent name matching) → REJECT or GPT JUDGE
+ * Stage 3: Security Verification
+ *   - Receiver name is primary; account number is optional supporting evidence
+ *   - Wrong receiver (intelligent name matching) → REJECT or GPT JUDGE
  *   - Old screenshot → REJECT + fraud alert
  *   - Duplicate Trx ID → REJECT + fraud alert
  *   - Amount mismatch → PENDING
@@ -94,36 +98,56 @@ function normalizeAccount(account) {
  * @param {string} recipientName - Name from OCR
  * @param {object} expected - Expected values { toAccount, recipientNames, allowedAliases }
  * @param {object} options - Additional options { tenantId, recordId }
- * @returns {Promise<object>} - { verified, skipped, reason, confidence, matchType, requiresGPT }
+ * @returns {Promise<object>} - Receiver verdict plus independent account evidence
  */
 async function verifyRecipient(toAccount, recipientName, expected, options = {}) {
-  // If no expected values, skip verification
-  if (!expected.toAccount && (!expected.recipientNames || expected.recipientNames.length === 0)) {
+  // Account-number evidence is useful, but it never decides recipient identity.
+  // Many Cambodian receipts omit the destination account while still showing
+  // the receiver.  Conversely, an account match must not hide a wrong receiver.
+  let accountResult = null;
+  if (expected.toAccount && toAccount) {
+    accountResult = await verifyAccountNumber(toAccount, expected.toAccount);
+  }
+
+  const accountEvidence = {
+    accountVerified: accountResult ? accountResult.verified : null,
+    accountSkipped: !expected.toAccount || !toAccount,
+    accountConfidence: accountResult ? accountResult.confidence : null,
+    accountMatchType: accountResult ? accountResult.matchType : 'skipped',
+    accountReason: accountResult ? accountResult.reason : (
+      !expected.toAccount ? 'No expected account configured' : 'Account number not shown in screenshot'
+    )
+  };
+
+  // The expected receiver name is the primary identity anchor.  Without it,
+  // an account number alone is supporting evidence, not enough to auto-verify.
+  if (!expected.recipientNames || expected.recipientNames.length === 0) {
     return {
       verified: null,
       skipped: true,
-      reason: 'No recipient verification required',
+      reason: 'No expected receiver name configured',
       confidence: null,
-      matchType: 'skipped'
+      matchType: 'skipped',
+      ...accountEvidence
     };
   }
 
-  // Step 1: Account number verification (exact match required)
-  if (expected.toAccount && toAccount) {
-    const accountResult = await verifyAccountNumber(toAccount, expected.toAccount);
-    if (accountResult.verified) {
-      return {
-        verified: true,
-        skipped: false,
-        reason: accountResult.reason,
-        confidence: 100,
-        matchType: 'account_exact',
-        requiresGPT: false
-      };
-    }
+  // A receipt with no receiver cannot be auto-approved, even if its account
+  // number matches.  Hold it for the merchant instead of rejecting it.
+  if (!recipientName) {
+    return {
+      verified: null,
+      skipped: false,
+      unverifiable: true,
+      reason: 'Receiver name not found in screenshot',
+      confidence: null,
+      matchType: 'receiver_missing',
+      requiresGPT: false,
+      ...accountEvidence
+    };
   }
 
-  // Step 2: Name intelligence verification
+  // Receiver-name intelligence controls the identity verdict.
   if (expected.recipientNames && recipientName) {
     const nameResult = await nameIntelligence.analyzeMatch(
       recipientName,
@@ -145,7 +169,8 @@ async function verifyRecipient(toAccount, recipientName, expected, options = {})
         confidence: nameResult.confidence,
         matchType: nameResult.matchType,
         requiresGPT: false,
-        nameIntelligence: nameResult.details
+        nameIntelligence: nameResult.details,
+        ...accountEvidence
       };
     }
 
@@ -158,7 +183,8 @@ async function verifyRecipient(toAccount, recipientName, expected, options = {})
         confidence: nameResult.confidence,
         matchType: nameResult.matchType,
         requiresGPT: true,
-        nameIntelligence: nameResult.details
+        nameIntelligence: nameResult.details,
+        ...accountEvidence
       };
     }
 
@@ -170,29 +196,10 @@ async function verifyRecipient(toAccount, recipientName, expected, options = {})
       confidence: nameResult.confidence,
       matchType: nameResult.matchType,
       requiresGPT: false,
-      nameIntelligence: nameResult.details
+      nameIntelligence: nameResult.details,
+      ...accountEvidence
     };
   }
-
-  // No recipient info found
-  if (!toAccount && !recipientName) {
-    return {
-      verified: false,
-      skipped: false,
-      reason: 'No recipient info found in screenshot',
-      confidence: 0,
-      matchType: 'no_data'
-    };
-  }
-
-  // Fallback: No match
-  return {
-    verified: false,
-    skipped: false,
-    reason: `Recipient mismatch: got ${toAccount || 'N/A'} / ${recipientName || 'N/A'}`,
-    confidence: 0,
-    matchType: 'no_match'
-  };
 }
 
 /**
@@ -203,7 +210,12 @@ async function verifyRecipient(toAccount, recipientName, expected, options = {})
  */
 async function verifyAccountNumber(extracted, expected) {
   if (!extracted || !expected) {
-    return { verified: false, reason: 'Missing account information' };
+    return {
+      verified: false,
+      confidence: 0,
+      matchType: 'account_missing',
+      reason: 'Missing account information'
+    };
   }
 
   // Normalize account numbers (remove spaces, dashes, dots)
@@ -214,6 +226,8 @@ async function verifyAccountNumber(extracted, expected) {
   if (normalizedExtracted === normalizedExpected) {
     return {
       verified: true,
+      confidence: 100,
+      matchType: 'account_exact',
       reason: `Account number matched: ${expected}`
     };
   }
@@ -223,12 +237,16 @@ async function verifyAccountNumber(extracted, expected) {
       normalizedExpected.includes(normalizedExtracted)) {
     return {
       verified: true,
+      confidence: 90,
+      matchType: 'account_partial',
       reason: `Account number partially matched: ${expected}`
     };
   }
 
   return {
     verified: false,
+    confidence: 0,
+    matchType: 'account_mismatch',
     reason: `Account mismatch: expected ${expected}, got ${extracted}`
   };
 }
@@ -456,9 +474,9 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     const missing = [];
     if (!ocrResult.amount) missing.push('amount');
     if (!ocrResult.currency) missing.push('currency');
-    if (!ocrResult.transactionId && !ocrResult.toAccount) missing.push('transactionId|toAccount');
     if (!ocrResult.bankName) missing.push('bankName');
     if (!ocrResult.recipientName) missing.push('recipientName');
+    if (!ocrResult.transactionDate) missing.push('transactionDate');
     console.log(`Stage 2: PENDING (${ocrResult.confidence} confidence) | Record ${recordId} | Engine: ${ocrResult.ocrEngine || 'unknown'} | Missing: [${missing.join(', ') || 'none'}]`);
     console.log(`   Got → bank:${ocrResult.bankName || '—'} | amount:${ocrResult.amount || '—'} ${ocrResult.currency || ''} | trxId:${ocrResult.transactionId || '—'} | toAcc:${ocrResult.toAccount || '—'} | recipient:${ocrResult.recipientName || '—'} | date:${ocrResult.transactionDate || '—'}`);
     return result;
@@ -471,7 +489,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     console.log(`Stage 2: Medium confidence but all critical fields present - proceeding | Record ${recordId}`);
   }
 
-  // ====== STAGE 3: Security verification (HIGH confidence only) ======
+  // ====== STAGE 3: Security verification ======
 
   // 3a: Enhanced recipient verification with name intelligence
   const recipientCheck = await verifyRecipient(
@@ -489,10 +507,11 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   );
 
   // Update validation results with enhanced data
-  result.validation.toAccount.match = recipientCheck.verified;
-  result.validation.toAccount.skipped = recipientCheck.skipped;
-  result.validation.toAccount.confidence = recipientCheck.confidence;
-  result.validation.toAccount.matchType = recipientCheck.matchType;
+  result.validation.toAccount.match = recipientCheck.accountVerified;
+  result.validation.toAccount.skipped = recipientCheck.accountSkipped;
+  result.validation.toAccount.confidence = recipientCheck.accountConfidence;
+  result.validation.toAccount.matchType = recipientCheck.accountMatchType;
+  result.validation.toAccount.reason = recipientCheck.accountReason;
 
   result.validation.recipientNames.match = recipientCheck.verified;
   result.validation.recipientNames.skipped = recipientCheck.skipped;
@@ -523,15 +542,14 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
     return result;
   }
 
-  // Track whether the recipient could be verified at all. verifyRecipient
-  // returns skipped:true when the invoice supplied NEITHER an expected account
-  // NOR a recipient name — in that case a payment to the WRONG account would
-  // otherwise pass on amount+date alone. We must not auto-approve; downgrade to
-  // manual review at the final stage (security: recipient-null bypass).
-  const recipientUnverifiable = recipientCheck.skipped === true;
+  // Track whether receiver identity could be checked. This is true when the
+  // invoice supplied no expected receiver or the receipt did not show one.
+  // Account, amount and date alone must not auto-approve the payment.
+  const recipientUnverifiable = recipientCheck.skipped === true ||
+    recipientCheck.unverifiable === true;
 
   // 3b: Date validation (old screenshot check)
-  if (ocrResult.transactionDate) {
+  {
     const dateValidation = validateTransactionDate(ocrResult.transactionDate, uploadedAt, maxAgeDays);
     result.validation.dateValidation = dateValidation;
     result.validation.isOldScreenshot = !dateValidation.isValid && dateValidation.fraudType === FRAUD_TYPES.OLD_SCREENSHOT;
@@ -670,9 +688,8 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
   }
 
   // ====== ALL CHECKS PASSED ======
-  // If recipient could not be verified (no expected account/name on the
-  // invoice), do NOT auto-approve on amount+date alone — route to manual
-  // review so the merchant confirms the payment went to the right place.
+  // If receiver identity could not be verified, do NOT auto-approve on the
+  // supporting checks alone; route to manual merchant review.
   if (recipientUnverifiable) {
     result.verification.status = 'pending';
     result.verification.rejectionReason = FRAUD_TYPES.RECIPIENT_UNVERIFIABLE;

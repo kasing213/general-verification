@@ -57,9 +57,9 @@ src/db/mongo.js                   - MongoDB connection, collections, GridFS, ind
 Image → OCR Extraction → PRE-CHECK: Duplicate Transaction
     ↓
 Stage 1: Bank statement detection (isBankStatement)
-Stage 2: Confidence check (low/medium → PENDING)
+Stage 2: Read-quality check (medium proceeds when receiver/date/amount/currency are present)
 Stage 3: Security verification
-  3a: Recipient verification (name intelligence 7-step)
+  3a: Receiver-name verification (primary identity; account number is optional evidence)
   3b: Date validation (old screenshot >7 days)
   3c: Bank verification
   3d: Amount verification (±5% tolerance)
@@ -159,6 +159,12 @@ fraudAlerts: { alertId: 1 } (unique), { payment_id: 1 }
 - ≥ 85% (`strictThreshold`): Auto-approve
 - 70-84% (`gptThreshold`): GPT judgment / manual review
 - < 70%: Reject
+
+**Receiver-first rule (2026-09-14):** The expected receiver name is mandatory
+for automatic verification. A matching receiver can pass when the receipt does
+not show a destination account number. An account-number match is recorded as
+supporting evidence only and never overrides a wrong or missing receiver.
+Transaction date and amount must also pass before the payment is verified.
 
 **Khmer script handling:** Detected by `/[\u1780-\u17FF]/` — preserves structure, only strips zero-width chars (no uppercase, no punctuation removal).
 
