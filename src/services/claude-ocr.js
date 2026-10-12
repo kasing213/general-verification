@@ -23,15 +23,17 @@ const Anthropic = require('@anthropic-ai/sdk');
 // ── Model selection ─────────────────────────────────────────────────
 //
 // One env var picks the model for all three agents:
-//   CLAUDE_OCR_MODEL  (default: claude-haiku-4-5-20251001)
-// Rollback to the previous model is an env change only, no code edit:
-//   CLAUDE_OCR_MODEL=claude-sonnet-4-6
+//   CLAUDE_OCR_MODEL  (default: claude-haiku-5-5)
+// Fallback / rollback is an env change only, no code edit:
+//   CLAUDE_OCR_MODEL=claude-haiku-4-5-20251001   (previous-generation Haiku)
+//   CLAUDE_OCR_MODEL=claude-sonnet-4-6           (the model used before 2026-10-12)
 // Optional per-agent overrides, for when one agent needs a stronger model
 // (e.g. DATE on Khmer numerals / month names, META on long transaction ids):
 //   CLAUDE_OCR_MODEL_DATE / CLAUDE_OCR_MODEL_AMOUNT / CLAUDE_OCR_MODEL_META
 // Read at call time, so tests can vary it; on Railway a variable change
 // applies on the redeploy it triggers.
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
+const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
 const ROLLBACK_MODEL = 'claude-sonnet-4-6';
 const AGENT_LABELS = ['DATE', 'AMOUNT', 'META'];
 
@@ -42,41 +44,121 @@ function resolveModel(label) {
     DEFAULT_MODEL;
 }
 
+// ── Request options per model ───────────────────────────────────────
+//
 // Models that run adaptive thinking BY DEFAULT when `thinking` is omitted
 // (Claude Haiku 5.5, Sonnet 5/5.5, Opus 5/5.5, Fable, Mythos). Thinking tokens
-// count against max_tokens, so 600 could let a thinking block eat the budget
-// and return no JSON. For these we send a low effort and a larger ceiling.
+// count against max_tokens, so a 600 ceiling could let a thinking block eat
+// the budget and return no JSON. These get an explicit effort and a larger
+// ceiling. No temperature / top_p / top_k and no prefill are ever sent (both
+// return 400 on Haiku 5.5).
+//
 // Haiku 4.5 / Sonnet 4.6 run WITHOUT thinking when `thinking` is omitted, and
 // Haiku 4.5 rejects the effort parameter, so they get neither.
 const ADAPTIVE_DEFAULT_RE = /^claude-(?:(?:haiku|sonnet|opus)-5|fable|mythos)/;
 
+// Models documented to accept thinking: {type: "disabled"} (at low/medium/
+// high effort only). Per platform.claude.com/docs/en/build-with-claude/effort
+// ("Recommended effort levels for Claude Haiku 5.5"): "You can also send
+// thinking: {type: "disabled"} at high effort or below. At xhigh or max, it
+// returns a 400 error." Opus 5.5 / Fable reject "disabled" at every level and
+// Sonnet 5.5 uses "between_tools" instead, so they are NOT listed here.
+//
+// For these three extraction prompts we turn thinking OFF by default:
+//   - cheaper: zero thinking tokens. At effort "low" the model can still
+//     think ("At lower effort levels, Claude still thinks on sufficiently
+//     difficult problems"), billed as output, and a hard Khmer screenshot is
+//     exactly where it would;
+//   - safer: no thinking block can consume max_tokens before the JSON;
+//   - same shape as the Sonnet 4.6 / Haiku 4.5 path, which never thought.
+// The doc's thinking-off caveat (skipped tool calls with structured outputs)
+// does not apply: these requests use no tools and no output_config.format.
+// Set CLAUDE_OCR_THINKING=adaptive to let the model think (A/B on staging).
+const THINKING_DISABLE_OK_RE = /^claude-haiku-5-5/;
+const ALLOWED_DISABLED_EFFORTS = new Set(['low', 'medium', 'high']);
+
 function requestOptionsFor(model) {
   const envMax = parseInt(process.env.CLAUDE_OCR_MAX_TOKENS, 10);
-  if (ADAPTIVE_DEFAULT_RE.test(model)) {
+  if (!ADAPTIVE_DEFAULT_RE.test(model)) {
+    // Each agent returns a short JSON object (well under 200 tokens).
+    return { max_tokens: envMax > 0 ? envMax : 600 };
+  }
+
+  const effort = (process.env.CLAUDE_OCR_EFFORT || 'low').trim();
+  const wantAdaptive = (process.env.CLAUDE_OCR_THINKING || '').trim().toLowerCase() === 'adaptive';
+  const disableThinking = !wantAdaptive &&
+    THINKING_DISABLE_OK_RE.test(model) &&
+    ALLOWED_DISABLED_EFFORTS.has(effort);
+
+  if (disableThinking) {
     return {
-      max_tokens: envMax > 0 ? envMax : 4000,
-      output_config: { effort: process.env.CLAUDE_OCR_EFFORT || 'low' }
+      max_tokens: envMax > 0 ? envMax : 1000,
+      thinking: { type: 'disabled' },
+      output_config: { effort }
     };
   }
-  // Each agent returns a short JSON object (well under 200 tokens).
-  return { max_tokens: envMax > 0 ? envMax : 600 };
+  // Adaptive thinking (the model default): leave room for it.
+  return {
+    max_tokens: envMax > 0 ? envMax : 4000,
+    output_config: { effort }
+  };
 }
 
 // Published per-MTok list prices (USD, standard tier, global routing),
 // checked 2026-10-12 at platform.claude.com/docs/en/about-claude/pricing.
 // Used only for the per-scan cost log line; unknown models log tokens only.
 const PRICE_PER_MTOK = {
+  // Haiku 5.5 is priced by prompt length; a screenshot prompt is ~5k tokens,
+  // far under the 100k threshold, so only the lower tier applies here.
+  'claude-haiku-5-5': { input: 0.10, output: 0.50 },
   'claude-haiku-4-5': { input: 1.0, output: 5.0 },
-  'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
-  'claude-haiku-5-5': { input: 0.10, output: 0.50 } // prompts <= 100k tokens
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 }
 };
+const HAIKU_55_LONG_PROMPT = { threshold: 100000, input: 0.50, output: 2.50 };
 
 function estimateCostUsd(model, usage) {
   if (!usage) return null;
   const key = Object.keys(PRICE_PER_MTOK).find(k => model === k || model.startsWith(`${k}-`));
   if (!key) return null;
-  const p = PRICE_PER_MTOK[key];
+  let p = PRICE_PER_MTOK[key];
+  const promptTokens = (usage.input_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  if (key === 'claude-haiku-5-5' && promptTokens > HAIKU_55_LONG_PROMPT.threshold) {
+    p = HAIKU_55_LONG_PROMPT;
+  }
   return ((usage.input_tokens || 0) * p.input + (usage.output_tokens || 0) * p.output) / 1e6;
+}
+
+// Pulls the agent's JSON object out of the reply. Haiku 5.5 "sometimes writes
+// reasoning-like text in the reply ... more often with thinking off or at low
+// effort" (Prompting Claude Haiku 5.5), so prose around the JSON is expected.
+// Try the outermost {...} first (the common case), then fall back to the last
+// balanced {...} that parses, so a stray brace in prose can't break it.
+function extractJson(text) {
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (!greedy) return null;
+  try { return JSON.parse(greedy[0]); } catch (_) { /* fall through */ }
+  const candidates = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    let depth = 0;
+    let inStr = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (inStr) {
+        if (c === '\\') j++;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) { candidates.push(text.slice(i, j + 1)); break; }
+    }
+  }
+  for (let k = candidates.length - 1; k >= 0; k--) {
+    try { return JSON.parse(candidates[k]); } catch (_) { /* try previous */ }
+  }
+  return null;
 }
 
 const TIMEOUT_MS = parseInt(process.env.CLAUDE_OCR_TIMEOUT_MS, 10) || 15000;
@@ -245,11 +327,10 @@ async function callAgent(label, prompt, base64Image, mediaType) {
     .map(b => b.text)
     .join('\n');
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  const parsed = extractJson(text);
+  if (!parsed) {
     throw new Error(`[OCR-CLAUDE/${label}] no JSON in response (stop_reason=${response.stop_reason}, model=${model}): ${text.slice(0, 200)}`);
   }
-  const parsed = JSON.parse(jsonMatch[0]);
   const usage = response.usage || null;
   const cost = estimateCostUsd(model, usage);
   const usageNote = usage
@@ -360,7 +441,9 @@ module.exports = {
     PROMPT_DATE,
     PROMPT_AMOUNT,
     PROMPT_META,
+    extractJson,
     DEFAULT_MODEL,
+    FALLBACK_MODEL,
     ROLLBACK_MODEL,
     // Back-compat: the base model (no per-agent override) as resolved at load.
     MODEL: resolveModel()
