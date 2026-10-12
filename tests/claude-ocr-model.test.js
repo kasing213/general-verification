@@ -15,6 +15,7 @@ const ENV_KEYS = [
   'CLAUDE_OCR_MODEL_META',
   'CLAUDE_OCR_MAX_TOKENS',
   'CLAUDE_OCR_EFFORT',
+  'CLAUDE_OCR_THINKING',
   'ANTHROPIC_API_KEY',
   'CLAUDE_API_KEY'
 ];
@@ -64,19 +65,37 @@ function load() {
 }
 
 describe('model selection', () => {
-  test('defaults all three agents to Claude Haiku 4.5', async () => {
+  test('defaults all three agents to Claude Haiku 5.5, thinking off, effort low', async () => {
     mockAgents();
     const ocr = load();
-    expect(ocr._internals.DEFAULT_MODEL).toBe('claude-haiku-4-5-20251001');
+    expect(ocr._internals.DEFAULT_MODEL).toBe('claude-haiku-5-5');
     await ocr.extractWithClaude(Buffer.from('img'));
     expect(mockCreate).toHaveBeenCalledTimes(3);
+    for (const [req] of mockCreate.mock.calls) {
+      expect(req.model).toBe('claude-haiku-5-5');
+      expect(req.max_tokens).toBe(1000);
+      expect(req.thinking).toEqual({ type: 'disabled' });
+      expect(req.output_config).toEqual({ effort: 'low' });
+      // 400 on Haiku 5.5: never send sampling params or a prefill.
+      expect(req.temperature).toBeUndefined();
+      expect(req.top_p).toBeUndefined();
+      expect(req.top_k).toBeUndefined();
+      expect(req.messages[req.messages.length - 1].role).toBe('user');
+    }
+  });
+
+  test('fallback is env-only: CLAUDE_OCR_MODEL=claude-haiku-4-5-20251001', async () => {
+    process.env.CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';
+    mockAgents();
+    const ocr = load();
+    expect(ocr._internals.FALLBACK_MODEL).toBe('claude-haiku-4-5-20251001');
+    await ocr.extractWithClaude(Buffer.from('img'));
     for (const [req] of mockCreate.mock.calls) {
       expect(req.model).toBe('claude-haiku-4-5-20251001');
       expect(req.max_tokens).toBe(600);
       // Haiku 4.5 rejects effort and needs no thinking config.
       expect(req.output_config).toBeUndefined();
       expect(req.thinking).toBeUndefined();
-      expect(req.temperature).toBeUndefined();
     }
   });
 
@@ -105,35 +124,61 @@ describe('model selection', () => {
     }));
     expect(byPrompt).toEqual({
       DATE: 'claude-sonnet-4-6',
-      AMOUNT: 'claude-haiku-4-5-20251001',
-      META: 'claude-haiku-4-5-20251001'
+      AMOUNT: 'claude-haiku-5-5',
+      META: 'claude-haiku-5-5'
     });
   });
 
   test('blank env value falls back to the default', () => {
     process.env.CLAUDE_OCR_MODEL = '   ';
-    expect(load()._internals.resolveModel('META')).toBe('claude-haiku-4-5-20251001');
+    expect(load()._internals.resolveModel('META')).toBe('claude-haiku-5-5');
   });
 });
 
 describe('request options', () => {
-  test('adaptive-by-default models get low effort and room for thinking', () => {
+  test('per-model shapes', () => {
     const { requestOptionsFor } = load()._internals;
-    expect(requestOptionsFor('claude-haiku-5-5')).toEqual({ max_tokens: 4000, output_config: { effort: 'low' } });
+    expect(requestOptionsFor('claude-haiku-5-5'))
+      .toEqual({ max_tokens: 1000, thinking: { type: 'disabled' }, output_config: { effort: 'low' } });
     expect(requestOptionsFor('claude-haiku-4-5-20251001')).toEqual({ max_tokens: 600 });
     expect(requestOptionsFor('claude-sonnet-4-6')).toEqual({ max_tokens: 600 });
+    // Opus 5.5 rejects thinking "disabled" at every effort: adaptive + effort only.
+    expect(requestOptionsFor('claude-opus-5-5')).toEqual({ max_tokens: 4000, output_config: { effort: 'low' } });
+  });
+
+  test('CLAUDE_OCR_THINKING=adaptive lets Haiku 5.5 think, with room for it', () => {
+    process.env.CLAUDE_OCR_THINKING = 'adaptive';
+    const { requestOptionsFor } = load()._internals;
+    expect(requestOptionsFor('claude-haiku-5-5')).toEqual({ max_tokens: 4000, output_config: { effort: 'low' } });
+  });
+
+  test('thinking stays adaptive at xhigh/max, where "disabled" would 400', () => {
+    process.env.CLAUDE_OCR_EFFORT = 'xhigh';
+    const { requestOptionsFor } = load()._internals;
+    expect(requestOptionsFor('claude-haiku-5-5')).toEqual({ max_tokens: 4000, output_config: { effort: 'xhigh' } });
   });
 
   test('CLAUDE_OCR_MAX_TOKENS and CLAUDE_OCR_EFFORT override', () => {
     process.env.CLAUDE_OCR_MAX_TOKENS = '1200';
     process.env.CLAUDE_OCR_EFFORT = 'medium';
     const { requestOptionsFor } = load()._internals;
-    expect(requestOptionsFor('claude-haiku-5-5')).toEqual({ max_tokens: 1200, output_config: { effort: 'medium' } });
+    expect(requestOptionsFor('claude-haiku-5-5'))
+      .toEqual({ max_tokens: 1200, thinking: { type: 'disabled' }, output_config: { effort: 'medium' } });
     expect(requestOptionsFor('claude-haiku-4-5-20251001')).toEqual({ max_tokens: 1200 });
   });
 });
 
 describe('response handling', () => {
+  test('extractJson tolerates prose and stray braces around the JSON', () => {
+    const { extractJson } = load()._internals;
+    expect(extractJson('{"amount": 26000, "currency": "KHR"}')).toEqual({ amount: 26000, currency: 'KHR' });
+    expect(extractJson('Reading the header {big number}. Answer:\n{"amount": 26000, "currency": "KHR"}'))
+      .toEqual({ amount: 26000, currency: 'KHR' });
+    expect(extractJson('{"recipientName": "A } B", "bankName": "ABA"}'))
+      .toEqual({ recipientName: 'A } B', bankName: 'ABA' });
+    expect(extractJson('no json here')).toBeNull();
+  });
+
   test('extracts fields unchanged and skips leading thinking blocks', async () => {
     mockAgents();
     const base = mockCreate.getMockImplementation();
@@ -175,7 +220,9 @@ describe('response handling', () => {
     const usage = { input_tokens: 1_000_000, output_tokens: 1_000_000 };
     expect(estimateCostUsd('claude-haiku-4-5-20251001', usage)).toBeCloseTo(6.0);
     expect(estimateCostUsd('claude-sonnet-4-6', usage)).toBeCloseTo(18.0);
-    expect(estimateCostUsd('claude-haiku-5-5', usage)).toBeCloseTo(0.6);
+    expect(estimateCostUsd('claude-haiku-5-5', { input_tokens: 5000, output_tokens: 100 })).toBeCloseTo(0.00055, 6);
+    // Over 100k prompt tokens Haiku 5.5 bills the long-prompt tier ($0.50 / $2.50).
+    expect(estimateCostUsd('claude-haiku-5-5', usage)).toBeCloseTo(3.0);
     expect(estimateCostUsd('some-unknown-model', usage)).toBeNull();
   });
 });
