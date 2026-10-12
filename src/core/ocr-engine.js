@@ -150,7 +150,8 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
   console.log(`🔍 Starting intelligent OCR analysis | Bank: ${options.expectedBank || 'unknown'}`);
 
   // ====== STEP 0: Claude 3-agent (primary path) ======
-  // 3 parallel Sonnet 4.6 agents (DATE / AMOUNT / META). On any error or when
+  // 3 parallel Claude agents (DATE / AMOUNT / META), model from CLAUDE_OCR_MODEL
+  // (default Haiku 4.5, see claude-ocr.js). On any error or when
   // OCR_PRIMARY=cascade, fall through to the legacy PaddleOCR → Tesseract →
   // GPT-4o cascade below. Image enhancement is skipped on this path —
   // Claude vision handles raw screenshots well and the enhancer can degrade
