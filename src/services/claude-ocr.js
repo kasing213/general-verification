@@ -20,8 +20,65 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 
-const MODEL = process.env.CLAUDE_OCR_MODEL || 'claude-sonnet-4-6';
-const MAX_TOKENS = 600;
+// ── Model selection ─────────────────────────────────────────────────
+//
+// One env var picks the model for all three agents:
+//   CLAUDE_OCR_MODEL  (default: claude-haiku-4-5-20251001)
+// Rollback to the previous model is an env change only, no code edit:
+//   CLAUDE_OCR_MODEL=claude-sonnet-4-6
+// Optional per-agent overrides, for when one agent needs a stronger model
+// (e.g. DATE on Khmer numerals / month names, META on long transaction ids):
+//   CLAUDE_OCR_MODEL_DATE / CLAUDE_OCR_MODEL_AMOUNT / CLAUDE_OCR_MODEL_META
+// Read at call time, so tests can vary it; on Railway a variable change
+// applies on the redeploy it triggers.
+const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const ROLLBACK_MODEL = 'claude-sonnet-4-6';
+const AGENT_LABELS = ['DATE', 'AMOUNT', 'META'];
+
+function resolveModel(label) {
+  const perAgent = label ? process.env[`CLAUDE_OCR_MODEL_${label}`] : undefined;
+  return (perAgent && perAgent.trim()) ||
+    (process.env.CLAUDE_OCR_MODEL && process.env.CLAUDE_OCR_MODEL.trim()) ||
+    DEFAULT_MODEL;
+}
+
+// Models that run adaptive thinking BY DEFAULT when `thinking` is omitted
+// (Claude Haiku 5.5, Sonnet 5/5.5, Opus 5/5.5, Fable, Mythos). Thinking tokens
+// count against max_tokens, so 600 could let a thinking block eat the budget
+// and return no JSON. For these we send a low effort and a larger ceiling.
+// Haiku 4.5 / Sonnet 4.6 run WITHOUT thinking when `thinking` is omitted, and
+// Haiku 4.5 rejects the effort parameter, so they get neither.
+const ADAPTIVE_DEFAULT_RE = /^claude-(?:(?:haiku|sonnet|opus)-5|fable|mythos)/;
+
+function requestOptionsFor(model) {
+  const envMax = parseInt(process.env.CLAUDE_OCR_MAX_TOKENS, 10);
+  if (ADAPTIVE_DEFAULT_RE.test(model)) {
+    return {
+      max_tokens: envMax > 0 ? envMax : 4000,
+      output_config: { effort: process.env.CLAUDE_OCR_EFFORT || 'low' }
+    };
+  }
+  // Each agent returns a short JSON object (well under 200 tokens).
+  return { max_tokens: envMax > 0 ? envMax : 600 };
+}
+
+// Published per-MTok list prices (USD, standard tier, global routing),
+// checked 2026-10-12 at platform.claude.com/docs/en/about-claude/pricing.
+// Used only for the per-scan cost log line; unknown models log tokens only.
+const PRICE_PER_MTOK = {
+  'claude-haiku-4-5': { input: 1.0, output: 5.0 },
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
+  'claude-haiku-5-5': { input: 0.10, output: 0.50 } // prompts <= 100k tokens
+};
+
+function estimateCostUsd(model, usage) {
+  if (!usage) return null;
+  const key = Object.keys(PRICE_PER_MTOK).find(k => model === k || model.startsWith(`${k}-`));
+  if (!key) return null;
+  const p = PRICE_PER_MTOK[key];
+  return ((usage.input_tokens || 0) * p.input + (usage.output_tokens || 0) * p.output) / 1e6;
+}
+
 const TIMEOUT_MS = parseInt(process.env.CLAUDE_OCR_TIMEOUT_MS, 10) || 15000;
 
 let _client = null;
@@ -154,11 +211,12 @@ Output JSON only:
 async function callAgent(label, prompt, base64Image, mediaType) {
   const client = getClient();
   const started = Date.now();
+  const model = resolveModel(label);
 
   const response = await Promise.race([
     client.messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
+      model,
+      ...requestOptionsFor(model),
       messages: [
         {
           role: 'user',
@@ -175,17 +233,31 @@ async function callAgent(label, prompt, base64Image, mediaType) {
   ]);
 
   const elapsed = Date.now() - started;
-  const text = response.content
+
+  if (response.stop_reason === 'refusal') {
+    throw new Error(`[OCR-CLAUDE/${label}] model declined the request (refusal, model=${model})`);
+  }
+
+  // Select by block type, never by position: adaptive-thinking models put a
+  // thinking block first.
+  const text = (response.content || [])
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('\n');
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    throw new Error(`[OCR-CLAUDE/${label}] no JSON in response: ${text.slice(0, 200)}`);
+    throw new Error(`[OCR-CLAUDE/${label}] no JSON in response (stop_reason=${response.stop_reason}, model=${model}): ${text.slice(0, 200)}`);
   }
   const parsed = JSON.parse(jsonMatch[0]);
-  console.log(`✅ [OCR-CLAUDE/${label}] ${elapsed}ms ${JSON.stringify(parsed)}`);
+  const usage = response.usage || null;
+  const cost = estimateCostUsd(model, usage);
+  const usageNote = usage
+    ? ` in=${usage.input_tokens} out=${usage.output_tokens}${cost !== null ? ` ~$${cost.toFixed(5)}` : ''}`
+    : '';
+  console.log(`✅ [OCR-CLAUDE/${label}] ${elapsed}ms model=${model}${usageNote} ${JSON.stringify(parsed)}`);
+  // Non-enumerable so it never leaks into the extracted fields.
+  Object.defineProperty(parsed, '_usage', { value: { model, usage, costUsd: cost }, enumerable: false });
   return parsed;
 }
 
@@ -213,7 +285,8 @@ async function extractWithClaude(imageInput, options = {}) {
     throw new Error('extractWithClaude: imageInput must be Buffer or base64 string');
   }
 
-  console.log(`🔍 [OCR-CLAUDE] Dispatching 3 agents (model=${MODEL})`);
+  const models = AGENT_LABELS.map(l => `${l}=${resolveModel(l)}`).join(' ');
+  console.log(`🔍 [OCR-CLAUDE] Dispatching 3 agents (${models})`);
   const started = Date.now();
 
   const [dateResult, amountResult, metaResult] = await Promise.all([
@@ -241,6 +314,10 @@ async function extractWithClaude(imageInput, options = {}) {
 
   const elapsed = Date.now() - started;
   const normalizedAmount = normalizeAmountResult(amountResult);
+  const agentCosts = [dateResult, amountResult, metaResult]
+    .map(r => r && r._usage && r._usage.costUsd)
+    .filter(c => typeof c === 'number');
+  const scanCostUsd = agentCosts.length === 3 ? agentCosts.reduce((a, b) => a + b, 0) : null;
 
   const paymentData = {
     isBankStatement: metaResult.isBankStatement === true,
@@ -261,6 +338,10 @@ async function extractWithClaude(imageInput, options = {}) {
     _claudeElapsedMs: elapsed
   };
 
+  if (scanCostUsd !== null) {
+    console.log(`💲 [OCR-CLAUDE] scan cost ~$${scanCostUsd.toFixed(5)} (3 agents)`);
+  }
+
   console.log(`✅ [OCR-CLAUDE] Done in ${elapsed}ms — isPaid=${paymentData.isPaid} amount=${paymentData.amount} ${paymentData.currency} dateRaw="${paymentData.dateRaw}" trxId="${paymentData.transactionId}"`);
   return paymentData;
 }
@@ -273,9 +354,15 @@ module.exports = {
     callAgent,
     currencyFromEvidence,
     normalizeAmountResult,
+    resolveModel,
+    requestOptionsFor,
+    estimateCostUsd,
     PROMPT_DATE,
     PROMPT_AMOUNT,
     PROMPT_META,
-    MODEL
+    DEFAULT_MODEL,
+    ROLLBACK_MODEL,
+    // Back-compat: the base model (no per-agent override) as resolved at load.
+    MODEL: resolveModel()
   }
 };

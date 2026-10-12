@@ -14,12 +14,26 @@ Claude 3-agent (primary)   →  PaddleOCR → Tesseract → GPT-4o Vision (fallb
               MongoDB Storage (payments, fraudAlerts, screenshots via GridFS)
 ```
 
-**Primary path — Claude 3-agent (Sonnet 4.6).** Three parallel agents — DATE
+**Primary path — Claude 3-agent (Haiku 4.5 by default, `CLAUDE_OCR_MODEL`).** Three parallel agents — DATE
 (verbatim Khmer-safe transcription), AMOUNT (no math, no conversion), and
 META (classification + transactionId/account/recipient/bank) — fire in
 parallel. Wall-clock is `max(A,B,C)` ≈ 2-3s. Activates when
 `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) is set and `OCR_PRIMARY` is not
 `cascade`. On any error, falls through automatically to the cascade.
+
+**Model choice (2026-10-12: Sonnet 4.6 -> Haiku 4.5, cost).** All three
+agents default to `claude-haiku-4-5-20251001` ($1/$5 per MTok vs Sonnet 4.6's
+$3/$15), roughly a third of the per-scan cost. **Rollback is env-only:** set
+`CLAUDE_OCR_MODEL=claude-sonnet-4-6` on Railway; no code change. If one agent
+proves weaker on Haiku (DATE on Khmer numerals / month names, META on long
+transaction ids), override just that agent with `CLAUDE_OCR_MODEL_DATE` /
+`_AMOUNT` / `_META`. The request is plain vision + text, no thinking, no
+tools, `max_tokens` 600. Models that run adaptive thinking by default
+(`claude-haiku-5-5`, Sonnet/Opus 5.x) are detected and sent
+`output_config.effort=low` with a 4000-token ceiling instead, because their
+thinking tokens count against `max_tokens`. Each agent logs model, tokens and
+an estimated cost; each scan logs `💲 scan cost`. Tests:
+`tests/claude-ocr-model.test.js`.
 
 **Fallback cascade.** PaddleOCR → Tesseract → GPT-4o Vision. Same code as
 before. Gated by `GPT_FALLBACK_ENABLED` / `TESSERACT_FALLBACK_ENABLED`.
@@ -190,7 +204,10 @@ SHARE_DB_NAME               - Shared database name (default: customerDB)
 
 # OCR Engine — Claude primary (default when ANTHROPIC_API_KEY is set)
 OCR_PRIMARY                 - 'claude' (default) | 'cascade' to force legacy path
-CLAUDE_OCR_MODEL            - Model id (default: claude-sonnet-4-6; use claude-opus-4-7 for hard cases)
+CLAUDE_OCR_MODEL            - Model id for all 3 agents (default: claude-haiku-4-5-20251001; rollback: claude-sonnet-4-6)
+CLAUDE_OCR_MODEL_DATE       - Optional per-agent override (also _AMOUNT, _META); blank = use CLAUDE_OCR_MODEL
+CLAUDE_OCR_MAX_TOKENS       - Optional max_tokens override (default 600; 4000 on adaptive-thinking models)
+CLAUDE_OCR_EFFORT           - Effort for adaptive-thinking models only, e.g. claude-haiku-5-5 (default: low)
 CLAUDE_OCR_TIMEOUT_MS       - Per-agent timeout (default: 15000)
 
 # OCR Engine — legacy cascade (fallback path)
