@@ -150,7 +150,8 @@ async function analyzePaymentScreenshot(imageInput, options = {}) {
   console.log(`🔍 Starting intelligent OCR analysis | Bank: ${options.expectedBank || 'unknown'}`);
 
   // ====== STEP 0: Claude 3-agent (primary path) ======
-  // 3 parallel Sonnet 4.6 agents (DATE / AMOUNT / META). On any error or when
+  // 3 parallel Claude agents (DATE / AMOUNT / META), model from CLAUDE_OCR_MODEL
+  // (default Haiku 5.5, see claude-ocr.js). On any error or when
   // OCR_PRIMARY=cascade, fall through to the legacy PaddleOCR → Tesseract →
   // GPT-4o cascade below. Image enhancement is skipped on this path —
   // Claude vision handles raw screenshots well and the enhancer can degrade
@@ -827,6 +828,8 @@ function adaptClaudeResult(claudeRaw, processingTime) {
     confidence: claudeRaw.confidence || 'low',
     amount: claudeRaw.amount,
     currency: claudeRaw.currency,
+    amountText: claudeRaw.amountText || null,
+    currencySymbol: claudeRaw.currencySymbol || null,
     transactionId,
     referenceNumber: claudeRaw.referenceNumber || null,
     fromAccount: claudeRaw.fromAccount || null,
@@ -858,7 +861,12 @@ function logExtractedFields(engine, data) {
   console.log(`📋 [${engine}] Extracted fields:`);
   console.log(`   isBankStatement: ${present(data.isBankStatement)} | isPaid: ${present(data.isPaid)} | confidence: ${present(data.confidence)}`);
   console.log(`   bankName:        ${present(data.bankName)}`);
-  console.log(`   amount:          ${present(data.amount)} ${present(data.currency)}`);
+  console.log(
+    `   amount:          ${present(data.amount)} ${present(data.currency)}` +
+    (data.amountText || data.currencySymbol
+      ? ` (source: ${present(data.amountText)}, symbol: ${present(data.currencySymbol)})`
+      : '')
+  );
   console.log(`   transactionId:   ${present(data.transactionId)}`);
   console.log(`   referenceNumber: ${present(data.referenceNumber)}`);
   console.log(`   toAccount:       ${present(data.toAccount)}`);

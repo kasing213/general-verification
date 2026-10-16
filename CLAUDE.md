@@ -14,12 +14,51 @@ Claude 3-agent (primary)   →  PaddleOCR → Tesseract → GPT-4o Vision (fallb
               MongoDB Storage (payments, fraudAlerts, screenshots via GridFS)
 ```
 
-**Primary path — Claude 3-agent (Sonnet 4.6).** Three parallel agents — DATE
+**Primary path — Claude 3-agent (Haiku 5.5 by default, `CLAUDE_OCR_MODEL`).** Three parallel agents — DATE
 (verbatim Khmer-safe transcription), AMOUNT (no math, no conversion), and
 META (classification + transactionId/account/recipient/bank) — fire in
 parallel. Wall-clock is `max(A,B,C)` ≈ 2-3s. Activates when
 `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) is set and `OCR_PRIMARY` is not
 `cascade`. On any error, falls through automatically to the cascade.
+
+**Model choice (2026-10-12: Sonnet 4.6 -> Haiku 5.5, cost).** All three
+agents default to `claude-haiku-5-5` ($0.10 / $0.50 per MTok for prompts up to
+100k tokens; a screenshot prompt is ~5k) vs Sonnet 4.6's $3 / $15. Estimated
+per scan: Sonnet 4.6 ~$0.035 -> Haiku 4.5 ~$0.012 -> **Haiku 5.5 ~$0.002**.
+Haiku 5.5 is not a pure 10x on Haiku 4.5: it counts ~30% more text tokens
+(newer tokenizer) and reads images at the high-resolution tier (up to 2,576 px
+long edge / 4,784 visual tokens vs 1,568 / 1,568), so a phone screenshot costs
+~2.5x the image tokens. Check the real number in the `💲 scan cost` log line.
+
+**Fallback / rollback is env-only** (Railway variable, no code change):
+`CLAUDE_OCR_MODEL=claude-haiku-4-5-20251001` (previous Haiku) or
+`CLAUDE_OCR_MODEL=claude-sonnet-4-6` (the pre-2026-10-12 model). If one agent
+proves weaker (DATE on Khmer numerals / month names, META on long
+transaction ids), override just that agent with `CLAUDE_OCR_MODEL_DATE` /
+`_AMOUNT` / `_META`.
+
+**Request shape per model** (`requestOptionsFor` in `claude-ocr.js`):
+- `claude-haiku-5-5`: `thinking: {type: "disabled"}`, `output_config.effort: "low"`,
+  `max_tokens` 1000. The effort docs (Recommended effort levels for Claude Haiku
+  5.5) allow `disabled` at low/medium/high only. Off is cheaper (zero thinking
+  tokens; at `low` the model can still think on hard images) and safer (no
+  thinking block can eat `max_tokens` before the JSON), and it matches the
+  old path, which never thought. `CLAUDE_OCR_THINKING=adaptive` turns thinking
+  back on (4000-token ceiling) for an A/B; `CLAUDE_OCR_EFFORT` changes the level
+  (at `xhigh`/`max` thinking stays adaptive, since `disabled` is a 400 there).
+- Other adaptive-by-default models (Sonnet/Opus 5.x, Fable): effort `low`,
+  adaptive thinking, 4000 ceiling (Opus 5.5 rejects `disabled` at every level).
+- Haiku 4.5 / Sonnet 4.6: plain request, no thinking, no effort (Haiku 4.5
+  rejects it), `max_tokens` 600.
+- Never sent on any model: `temperature` / `top_p` / `top_k`, assistant prefill
+  (400 on Haiku 5.5). Vision + text only, no tools, no structured outputs.
+
+Haiku 5.5 may write prose around the JSON (more often with thinking off);
+`extractJson` takes the outermost object, else the last balanced one that
+parses. It also runs safety classifiers: a `refusal` stop reason fails only
+that agent, which falls back to its null result. Each agent logs model,
+tokens and estimated cost; each scan logs `💲 scan cost`. Tests:
+`tests/claude-ocr-model.test.js`.
 
 **Fallback cascade.** PaddleOCR → Tesseract → GPT-4o Vision. Same code as
 before. Gated by `GPT_FALLBACK_ENABLED` / `TESSERACT_FALLBACK_ENABLED`.
@@ -190,7 +229,11 @@ SHARE_DB_NAME               - Shared database name (default: customerDB)
 
 # OCR Engine — Claude primary (default when ANTHROPIC_API_KEY is set)
 OCR_PRIMARY                 - 'claude' (default) | 'cascade' to force legacy path
-CLAUDE_OCR_MODEL            - Model id (default: claude-sonnet-4-6; use claude-opus-4-7 for hard cases)
+CLAUDE_OCR_MODEL            - Model id for all 3 agents (default: claude-haiku-5-5; fallback: claude-haiku-4-5-20251001; rollback: claude-sonnet-4-6)
+CLAUDE_OCR_MODEL_DATE       - Optional per-agent override (also _AMOUNT, _META); blank = use CLAUDE_OCR_MODEL
+CLAUDE_OCR_THINKING         - Haiku 5.5 only: unset = thinking disabled (default); 'adaptive' = let it think
+CLAUDE_OCR_EFFORT           - Effort for 5.x models (default: low); ignored on Haiku 4.5 / Sonnet 4.6
+CLAUDE_OCR_MAX_TOKENS       - Optional max_tokens override (default: 1000 Haiku 5.5 thinking-off, 4000 adaptive, 600 Haiku 4.5 / Sonnet 4.6)
 CLAUDE_OCR_TIMEOUT_MS       - Per-agent timeout (default: 15000)
 
 # OCR Engine — legacy cascade (fallback path)

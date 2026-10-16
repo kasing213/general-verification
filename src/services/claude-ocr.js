@@ -20,8 +20,147 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 
-const MODEL = process.env.CLAUDE_OCR_MODEL || 'claude-sonnet-4-6';
-const MAX_TOKENS = 600;
+// ── Model selection ─────────────────────────────────────────────────
+//
+// One env var picks the model for all three agents:
+//   CLAUDE_OCR_MODEL  (default: claude-haiku-5-5)
+// Fallback / rollback is an env change only, no code edit:
+//   CLAUDE_OCR_MODEL=claude-haiku-4-5-20251001   (previous-generation Haiku)
+//   CLAUDE_OCR_MODEL=claude-sonnet-4-6           (the model used before 2026-10-12)
+// Optional per-agent overrides, for when one agent needs a stronger model
+// (e.g. DATE on Khmer numerals / month names, META on long transaction ids):
+//   CLAUDE_OCR_MODEL_DATE / CLAUDE_OCR_MODEL_AMOUNT / CLAUDE_OCR_MODEL_META
+// Read at call time, so tests can vary it; on Railway a variable change
+// applies on the redeploy it triggers.
+const DEFAULT_MODEL = 'claude-haiku-5-5';
+const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
+const ROLLBACK_MODEL = 'claude-sonnet-4-6';
+const AGENT_LABELS = ['DATE', 'AMOUNT', 'META'];
+
+function resolveModel(label) {
+  const perAgent = label ? process.env[`CLAUDE_OCR_MODEL_${label}`] : undefined;
+  return (perAgent && perAgent.trim()) ||
+    (process.env.CLAUDE_OCR_MODEL && process.env.CLAUDE_OCR_MODEL.trim()) ||
+    DEFAULT_MODEL;
+}
+
+// ── Request options per model ───────────────────────────────────────
+//
+// Models that run adaptive thinking BY DEFAULT when `thinking` is omitted
+// (Claude Haiku 5.5, Sonnet 5/5.5, Opus 5/5.5, Fable, Mythos). Thinking tokens
+// count against max_tokens, so a 600 ceiling could let a thinking block eat
+// the budget and return no JSON. These get an explicit effort and a larger
+// ceiling. No temperature / top_p / top_k and no prefill are ever sent (both
+// return 400 on Haiku 5.5).
+//
+// Haiku 4.5 / Sonnet 4.6 run WITHOUT thinking when `thinking` is omitted, and
+// Haiku 4.5 rejects the effort parameter, so they get neither.
+const ADAPTIVE_DEFAULT_RE = /^claude-(?:(?:haiku|sonnet|opus)-5|fable|mythos)/;
+
+// Models documented to accept thinking: {type: "disabled"} (at low/medium/
+// high effort only). Per platform.claude.com/docs/en/build-with-claude/effort
+// ("Recommended effort levels for Claude Haiku 5.5"): "You can also send
+// thinking: {type: "disabled"} at high effort or below. At xhigh or max, it
+// returns a 400 error." Opus 5.5 / Fable reject "disabled" at every level and
+// Sonnet 5.5 uses "between_tools" instead, so they are NOT listed here.
+//
+// For these three extraction prompts we turn thinking OFF by default:
+//   - cheaper: zero thinking tokens. At effort "low" the model can still
+//     think ("At lower effort levels, Claude still thinks on sufficiently
+//     difficult problems"), billed as output, and a hard Khmer screenshot is
+//     exactly where it would;
+//   - safer: no thinking block can consume max_tokens before the JSON;
+//   - same shape as the Sonnet 4.6 / Haiku 4.5 path, which never thought.
+// The doc's thinking-off caveat (skipped tool calls with structured outputs)
+// does not apply: these requests use no tools and no output_config.format.
+// Set CLAUDE_OCR_THINKING=adaptive to let the model think (A/B on staging).
+const THINKING_DISABLE_OK_RE = /^claude-haiku-5-5/;
+const ALLOWED_DISABLED_EFFORTS = new Set(['low', 'medium', 'high']);
+
+function requestOptionsFor(model) {
+  const envMax = parseInt(process.env.CLAUDE_OCR_MAX_TOKENS, 10);
+  if (!ADAPTIVE_DEFAULT_RE.test(model)) {
+    // Each agent returns a short JSON object (well under 200 tokens).
+    return { max_tokens: envMax > 0 ? envMax : 600 };
+  }
+
+  const effort = (process.env.CLAUDE_OCR_EFFORT || 'low').trim();
+  const wantAdaptive = (process.env.CLAUDE_OCR_THINKING || '').trim().toLowerCase() === 'adaptive';
+  const disableThinking = !wantAdaptive &&
+    THINKING_DISABLE_OK_RE.test(model) &&
+    ALLOWED_DISABLED_EFFORTS.has(effort);
+
+  if (disableThinking) {
+    return {
+      max_tokens: envMax > 0 ? envMax : 1000,
+      thinking: { type: 'disabled' },
+      output_config: { effort }
+    };
+  }
+  // Adaptive thinking (the model default): leave room for it.
+  return {
+    max_tokens: envMax > 0 ? envMax : 4000,
+    output_config: { effort }
+  };
+}
+
+// Published per-MTok list prices (USD, standard tier, global routing),
+// checked 2026-10-12 at platform.claude.com/docs/en/about-claude/pricing.
+// Used only for the per-scan cost log line; unknown models log tokens only.
+const PRICE_PER_MTOK = {
+  // Haiku 5.5 is priced by prompt length; a screenshot prompt is ~5k tokens,
+  // far under the 100k threshold, so only the lower tier applies here.
+  'claude-haiku-5-5': { input: 0.10, output: 0.50 },
+  'claude-haiku-4-5': { input: 1.0, output: 5.0 },
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 }
+};
+const HAIKU_55_LONG_PROMPT = { threshold: 100000, input: 0.50, output: 2.50 };
+
+function estimateCostUsd(model, usage) {
+  if (!usage) return null;
+  const key = Object.keys(PRICE_PER_MTOK).find(k => model === k || model.startsWith(`${k}-`));
+  if (!key) return null;
+  let p = PRICE_PER_MTOK[key];
+  const promptTokens = (usage.input_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  if (key === 'claude-haiku-5-5' && promptTokens > HAIKU_55_LONG_PROMPT.threshold) {
+    p = HAIKU_55_LONG_PROMPT;
+  }
+  return ((usage.input_tokens || 0) * p.input + (usage.output_tokens || 0) * p.output) / 1e6;
+}
+
+// Pulls the agent's JSON object out of the reply. Haiku 5.5 "sometimes writes
+// reasoning-like text in the reply ... more often with thinking off or at low
+// effort" (Prompting Claude Haiku 5.5), so prose around the JSON is expected.
+// Try the outermost {...} first (the common case), then fall back to the last
+// balanced {...} that parses, so a stray brace in prose can't break it.
+function extractJson(text) {
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (!greedy) return null;
+  try { return JSON.parse(greedy[0]); } catch (_) { /* fall through */ }
+  const candidates = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    let depth = 0;
+    let inStr = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (inStr) {
+        if (c === '\\') j++;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) { candidates.push(text.slice(i, j + 1)); break; }
+    }
+  }
+  for (let k = candidates.length - 1; k >= 0; k--) {
+    try { return JSON.parse(candidates[k]); } catch (_) { /* try previous */ }
+  }
+  return null;
+}
+
 const TIMEOUT_MS = parseInt(process.env.CLAUDE_OCR_TIMEOUT_MS, 10) || 15000;
 
 let _client = null;
@@ -37,6 +176,43 @@ function getClient() {
 
 function isAvailable() {
   return !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY);
+}
+
+function currencyFromEvidence(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (text.includes('៛') || /KHR|រៀល/i.test(text)) return 'KHR';
+  if (text.includes('$') || /USD|ដុល្លារ/i.test(text)) return 'USD';
+  return null;
+}
+
+function normalizeAmountResult(result = {}) {
+  const amountText = typeof result.amountText === 'string' && result.amountText.trim()
+    ? result.amountText
+    : null;
+  const currencySymbol = typeof result.currencySymbol === 'string' && result.currencySymbol.trim()
+    ? result.currencySymbol
+    : null;
+  const statedCurrency = typeof result.currency === 'string'
+    ? result.currency.trim().toUpperCase()
+    : null;
+
+  // Literal evidence copied from beside the selected header amount wins over
+  // a contradictory normalized label. The old JSON shape discarded this on
+  // dual-currency receipts, leaving downstream verification unable to repair
+  // a model guess such as `៛10,000` -> `10000 USD`.
+  const evidenceCurrency = currencyFromEvidence(currencySymbol)
+    || currencyFromEvidence(amountText);
+
+  return {
+    amount: typeof result.amount === 'number' ? result.amount : null,
+    currency: evidenceCurrency
+      || (statedCurrency === 'KHR' || statedCurrency === 'USD' ? statedCurrency : null),
+    amountText,
+    currencySymbol
+  };
 }
 
 // ── Prompts ─────────────────────────────────────────────────────────
@@ -70,15 +246,19 @@ TASK: Find the LARGE/HEADER transfer amount and its currency.
 RULES:
 - Read the MAIN amount — the largest, most prominent number on screen (usually colored/highlighted near the top).
 - Return the NUMBER displayed, without commas. "26,000 ៛" → 26000. "1,200,000" → 1200000.
+- Copy the selected amount exactly into amountText, including its adjacent currency symbol/code.
+- Copy ONLY that adjacent symbol/code into currencySymbol (for example "៛", "$", "KHR", or "USD").
 - "៛" or "រៀល" → currency "KHR".
 - "$" or "ដុល្លារ" or "USD" → currency "USD".
-- If BOTH USD and KHR are shown, use the KHR amount (it is the actual Cambodian transfer value).
+- If both USD and KHR appear, select the currency immediately adjacent to the LARGE/HEADER transfer amount. Do not prefer either currency globally.
+- Ignore secondary rows labeled "Debit Amount", "Converted Amount", "Equivalent", "Fees", or "Charges". They are not the transfer amount.
+- Example: a header reading "៛10,000" plus a lower row reading "Debit Amount 2.47 USD" means amount=10000, currency=KHR, amountText="៛10,000", currencySymbol="៛".
 - NEVER multiply, divide, or convert between currencies. NEVER calculate from an exchange rate.
 - If the amount has a minus sign (e.g. "-26,000 KHR" on ABA), return the POSITIVE value: 26000.
 - If you cannot find a clear amount, return null for amount.
 
 Output JSON only:
-{"amount": number or null, "currency": "KHR" or "USD" or null}`;
+{"amount": number or null, "currency": "KHR" or "USD" or null, "amountText": "exact selected amount text or null", "currencySymbol": "exact adjacent symbol/code or null"}`;
 
 const PROMPT_META = `You are extracting reference and identity fields from a Cambodian bank screenshot.
 
@@ -113,11 +293,12 @@ Output JSON only:
 async function callAgent(label, prompt, base64Image, mediaType) {
   const client = getClient();
   const started = Date.now();
+  const model = resolveModel(label);
 
   const response = await Promise.race([
     client.messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
+      model,
+      ...requestOptionsFor(model),
       messages: [
         {
           role: 'user',
@@ -134,17 +315,30 @@ async function callAgent(label, prompt, base64Image, mediaType) {
   ]);
 
   const elapsed = Date.now() - started;
-  const text = response.content
+
+  if (response.stop_reason === 'refusal') {
+    throw new Error(`[OCR-CLAUDE/${label}] model declined the request (refusal, model=${model})`);
+  }
+
+  // Select by block type, never by position: adaptive-thinking models put a
+  // thinking block first.
+  const text = (response.content || [])
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('\n');
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error(`[OCR-CLAUDE/${label}] no JSON in response: ${text.slice(0, 200)}`);
+  const parsed = extractJson(text);
+  if (!parsed) {
+    throw new Error(`[OCR-CLAUDE/${label}] no JSON in response (stop_reason=${response.stop_reason}, model=${model}): ${text.slice(0, 200)}`);
   }
-  const parsed = JSON.parse(jsonMatch[0]);
-  console.log(`✅ [OCR-CLAUDE/${label}] ${elapsed}ms ${JSON.stringify(parsed)}`);
+  const usage = response.usage || null;
+  const cost = estimateCostUsd(model, usage);
+  const usageNote = usage
+    ? ` in=${usage.input_tokens} out=${usage.output_tokens}${cost !== null ? ` ~$${cost.toFixed(5)}` : ''}`
+    : '';
+  console.log(`✅ [OCR-CLAUDE/${label}] ${elapsed}ms model=${model}${usageNote} ${JSON.stringify(parsed)}`);
+  // Non-enumerable so it never leaks into the extracted fields.
+  Object.defineProperty(parsed, '_usage', { value: { model, usage, costUsd: cost }, enumerable: false });
   return parsed;
 }
 
@@ -172,7 +366,8 @@ async function extractWithClaude(imageInput, options = {}) {
     throw new Error('extractWithClaude: imageInput must be Buffer or base64 string');
   }
 
-  console.log(`🔍 [OCR-CLAUDE] Dispatching 3 agents (model=${MODEL})`);
+  const models = AGENT_LABELS.map(l => `${l}=${resolveModel(l)}`).join(' ');
+  console.log(`🔍 [OCR-CLAUDE] Dispatching 3 agents (${models})`);
   const started = Date.now();
 
   const [dateResult, amountResult, metaResult] = await Promise.all([
@@ -182,7 +377,7 @@ async function extractWithClaude(imageInput, options = {}) {
     }),
     callAgent('AMOUNT', PROMPT_AMOUNT, base64Image, mediaType).catch(err => {
       console.error(`❌ [OCR-CLAUDE/AMOUNT] ${err.message}`);
-      return { amount: null, currency: null };
+      return { amount: null, currency: null, amountText: null, currencySymbol: null };
     }),
     callAgent('META', PROMPT_META, base64Image, mediaType).catch(err => {
       console.error(`❌ [OCR-CLAUDE/META] ${err.message}`);
@@ -199,13 +394,20 @@ async function extractWithClaude(imageInput, options = {}) {
   ]);
 
   const elapsed = Date.now() - started;
+  const normalizedAmount = normalizeAmountResult(amountResult);
+  const agentCosts = [dateResult, amountResult, metaResult]
+    .map(r => r && r._usage && r._usage.costUsd)
+    .filter(c => typeof c === 'number');
+  const scanCostUsd = agentCosts.length === 3 ? agentCosts.reduce((a, b) => a + b, 0) : null;
 
   const paymentData = {
     isBankStatement: metaResult.isBankStatement === true,
     isPaid: metaResult.isPaid === true,
     confidence: metaResult.confidence || 'low',
-    amount: typeof amountResult.amount === 'number' ? amountResult.amount : null,
-    currency: amountResult.currency || null,
+    amount: normalizedAmount.amount,
+    currency: normalizedAmount.currency,
+    amountText: normalizedAmount.amountText,
+    currencySymbol: normalizedAmount.currencySymbol,
     transactionId: metaResult.transactionId || null,
     referenceNumber: null,
     fromAccount: null,
@@ -217,6 +419,10 @@ async function extractWithClaude(imageInput, options = {}) {
     _claudeElapsedMs: elapsed
   };
 
+  if (scanCostUsd !== null) {
+    console.log(`💲 [OCR-CLAUDE] scan cost ~$${scanCostUsd.toFixed(5)} (3 agents)`);
+  }
+
   console.log(`✅ [OCR-CLAUDE] Done in ${elapsed}ms — isPaid=${paymentData.isPaid} amount=${paymentData.amount} ${paymentData.currency} dateRaw="${paymentData.dateRaw}" trxId="${paymentData.transactionId}"`);
   return paymentData;
 }
@@ -225,5 +431,21 @@ module.exports = {
   extractWithClaude,
   isAvailable,
   // exported for testing
-  _internals: { callAgent, PROMPT_DATE, PROMPT_AMOUNT, PROMPT_META, MODEL }
+  _internals: {
+    callAgent,
+    currencyFromEvidence,
+    normalizeAmountResult,
+    resolveModel,
+    requestOptionsFor,
+    estimateCostUsd,
+    PROMPT_DATE,
+    PROMPT_AMOUNT,
+    PROMPT_META,
+    extractJson,
+    DEFAULT_MODEL,
+    FALLBACK_MODEL,
+    ROLLBACK_MODEL,
+    // Back-compat: the base model (no per-agent override) as resolved at load.
+    MODEL: resolveModel()
+  }
 };
