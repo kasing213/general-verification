@@ -160,6 +160,23 @@ async function verifyRecipient(toAccount, recipientName, expected, options = {})
       await logNameMatchAudit(recipientName, expected.recipientNames, nameResult, options);
     }
 
+    // Initials alone cannot tell CHAN KASING from CHAN KOSAL. Founder
+    // decision (2026-10-19): an initials match auto-approves only when the
+    // receipt's account number is an exact match; otherwise the merchant
+    // confirms it below.
+    if (nameResult.matchType === 'person_initials' && accountEvidence.accountMatchType === 'account_exact') {
+      return {
+        verified: true,
+        skipped: false,
+        reason: `${nameResult.reason}; account number matches exactly`,
+        confidence: 90,
+        matchType: 'person_initials_account',
+        requiresGPT: false,
+        nameIntelligence: nameResult.details,
+        ...accountEvidence
+      };
+    }
+
     // High confidence: Auto-approve
     if (nameResult.confidence >= nameIntelligence.config.strictThreshold) {
       return {

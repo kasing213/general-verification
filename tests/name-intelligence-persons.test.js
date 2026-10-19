@@ -15,10 +15,22 @@ async function score(extracted, expected) {
   return (await names.analyzeMatch(extracted, [expected], [])).confidence;
 }
 
+async function review(extracted, expected) {
+  const s = await score(extracted, expected);
+  return s >= REVIEW && s < STRICT;
+}
+
 describe('initials and joint accounts', () => {
-  test('initials stand in for full given names', async () => {
-    expect(await score('CHAN KASING AND THOEURN THEARY', 'CHAN K. & THOEURN T.')).toBeGreaterThanOrEqual(STRICT);
-    expect(await score('CHAN K. & THOEURN T.', 'CHAN KASING AND THOEURN THEARY')).toBeGreaterThanOrEqual(STRICT);
+  // An initial cannot tell CHAN KASING from CHAN KOSAL, so a match that leans
+  // on one goes to the merchant: never rejected, never auto-approved.
+  test('initials stand in for full given names, as merchant review', async () => {
+    expect(await review('CHAN KASING AND THOEURN THEARY', 'CHAN K. & THOEURN T.')).toBe(true);
+    expect(await review('CHAN K. & THOEURN T.', 'CHAN KASING AND THOEURN THEARY')).toBe(true);
+    expect(await review('CHAN KOSAL', 'CHAN K.')).toBe(true);
+  });
+
+  test('full names on both sides, joint account, auto-verify', async () => {
+    expect(await score('CHAN KASING AND THOEURN THEARY', 'CHAN KASING & THOEURN THEARY')).toBeGreaterThanOrEqual(STRICT);
   });
 
   test('"&", "AND", "+" and "/" all join two account holders', async () => {
@@ -65,5 +77,18 @@ describe('still refused', () => {
 
   test('short family names that differ by one letter are different people', async () => {
     expect(await score('CHAM KASING', 'CHAN KASING')).toBeLessThan(STRICT);
+  });
+
+  test('a real two-letter name is not an initial', async () => {
+    // OU and LY are family names, not abbreviations of OUK / LYHOUR.
+    expect(await score('OUK SOKHA', 'OU SOKHA')).toBeLessThan(REVIEW);
+    expect(await score('LYHOUR DARA', 'LY DARA')).toBeLessThan(REVIEW);
+  });
+
+  test('look-alike or accented letters never become an initial', async () => {
+    // Cyrillic C and accented letters were stripped by normalizeText,
+    // leaving fragments that the initials rule then accepted.
+    expect(await score('СНАН KASING', 'CHAN KASING')).toBeLessThan(STRICT);
+    expect(await score('CHÉN KASING', 'C. KASING')).toBeLessThan(STRICT);
   });
 });

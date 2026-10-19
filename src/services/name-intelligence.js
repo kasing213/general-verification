@@ -109,8 +109,18 @@ class NameIntelligenceService {
     // whole-string steps below were both too strict (0% for "CHAN K. &
     // THEOURN T." vs ABA's "CHAN KASING AND THOEURN THEARY") and too loose
     // ("C. K." and "CHAM KASING" both passed for "CHAN KASING").
-    if (this.isLatin(extracted) && this.isLatin(expected)) {
-      const person = this.personMatch(extracted, expected);
+    const asciiExtracted = this.toAsciiName(extracted);
+    const asciiExpected = this.toAsciiName(expected);
+    const khmer = /[ក-៿]/.test(extracted) || /[ក-៿]/.test(expected);
+    if (!khmer && (asciiExtracted === null || asciiExpected === null)) {
+      // Cyrillic look-alikes and other scripts: normalizeText would strip
+      // them into fragments the fuzzy steps accept. A person decides.
+      return this.createResult(75, 'unsupported_script', 'Name uses letters outside A-Z, needs review', {
+        steps: [...steps, 'unsupported_script']
+      });
+    }
+    if (!khmer) {
+      const person = this.personMatch(asciiExtracted, asciiExpected);
       if (person.score > 0) {
         return this.createResult(person.score, person.matchType, person.reason, {
           steps: [...steps, person.matchType]
@@ -225,36 +235,52 @@ class NameIntelligenceService {
       .trim();
   }
 
-  isLatin(text) {
-    return Boolean(text) && !/[ក-៿]/.test(text);
+  /**
+   * Upper-case printable-ASCII name with accents folded (CHÉN -> CHEN), or
+   * null when letters outside A-Z remain (e.g. Cyrillic look-alikes).
+   */
+  toAsciiName(text) {
+    if (!text) return null;
+    const folded = String(text).normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
+    return /^[\x20-\x7E]+$/.test(folded) ? folded : null;
   }
 
   /**
    * Account holders in a receiver name. Joint accounts print as
-   * "A AND B", "A & B", "A + B" or "A / B".
-   * @param {string} text - Raw name
-   * @returns {string[][]} - One token list per holder
+   * "A AND B", "A & B", "A + B" or "A / B". A word is an initial only when
+   * written as one - "K", "K." or "KS." - so real two-letter names such as
+   * OU or LY stay full words.
+   * @param {string} text - Upper-case ASCII name
+   * @returns {{w: string, initial: boolean}[][]} - One word list per holder
    */
   splitPersons(text) {
-    return String(text)
-      .toUpperCase()
+    return text
       .split(/\s+AND\s+|[&+/,;]/)
-      .map(part => this.normalizeText(part).split(' ').filter(Boolean))
+      .map(part => part.trim().split(/\s+/)
+        .map(raw => ({
+          w: raw.replace(/[^A-Z0-9]/g, ''),
+          initial: /^[A-Z]\.?$/.test(raw) || /^[A-Z]{2}\.$/.test(raw)
+        }))
+        .filter(t => t.w.length > 0))
       .filter(tokens => tokens.length > 0);
   }
 
   /**
-   * How two name words relate: 'exact' (incl. OCR look-alikes), 'initial'
-   * (K. for KASING), 'near' (one slipped or swapped letter in a word of 5+
-   * letters - romanised Khmer names are spelled many ways), or null.
+   * How two name words relate: 'exact' (incl. digits misread as letters),
+   * 'initial' (K. for KASING), 'near' (one slipped or swapped letter in a
+   * word of 5+ letters - romanised Khmer names are spelled many ways), or
+   * null.
    */
   tokenRelation(a, b) {
+    if (a.initial || b.initial) {
+      if (a.initial && b.initial) return a.w === b.w ? 'initial' : null;
+      const [init, full] = a.initial ? [a, b] : [b, a];
+      return full.w.startsWith(init.w) ? 'initial' : null;
+    }
     // Not applyOCRCorrections: its '.' key is a regex wildcard that turns
     // every word into dots, so any two words would compare equal.
-    if (a === b || this.ocrCanonical(a) === this.ocrCanonical(b)) return 'exact';
-    if ((a.length <= 2 && b.length > 2 && b.startsWith(a)) ||
-        (b.length <= 2 && a.length > 2 && a.startsWith(b))) return 'initial';
-    if (Math.min(a.length, b.length) >= 5 && this.damerauDistance(a, b) === 1) return 'near';
+    if (a.w === b.w || this.ocrCanonical(a.w) === this.ocrCanonical(b.w)) return 'exact';
+    if (Math.min(a.w.length, b.w.length) >= 5 && this.damerauDistance(a.w, b.w) === 1) return 'near';
     return null;
   }
 
@@ -277,15 +303,22 @@ class NameIntelligenceService {
       if (relations.some(r => r === null)) continue;
       const fullWords = relations.filter(r => r === 'exact' || r === 'near');
       if (fullWords.length === 0) continue;
-      return { near: relations.includes('near'), exactWord: relations.includes('exact') };
+      return {
+        near: relations.includes('near'),
+        exactWord: relations.includes('exact'),
+        usedInitial: relations.includes('initial')
+      };
     }
     return null;
   }
 
   /**
-   * Every expected holder must be on the receipt. Exact words and initials
-   * auto-verify; a one-letter slip, or extra holders on the receipt (the
-   * merchant's own joint account), go to the merchant instead.
+   * Every expected holder must be on the receipt. Exact words auto-verify.
+   * Anything weaker goes to the merchant, never auto-approved: an initial
+   * (K. cannot tell KASING from KOSAL), a one-letter slip, or extra holders
+   * on the receipt (the merchant's own joint account).
+   * @param {string} extracted - Upper-case ASCII name from the receipt
+   * @param {string} expected - Upper-case ASCII expected name
    * @returns {{score: number, matchType: string, reason: string}}
    */
   personMatch(extracted, expected) {
@@ -294,6 +327,7 @@ class NameIntelligenceService {
     const unused = extractedPersons.map((_, i) => i);
     let near = false;
     let exactWord = false;
+    let usedInitial = false;
 
     for (const person of expectedPersons) {
       let found = -1;
@@ -303,11 +337,12 @@ class NameIntelligenceService {
           found = idx;
           near = near || m.near;
           exactWord = exactWord || m.exactWord;
+          usedInitial = usedInitial || m.usedInitial;
           break;
         }
       }
       if (found === -1) {
-        return { score: 0, matchType: 'no_match', reason: `Receiver "${person.join(' ')}" not on the receipt` };
+        return { score: 0, matchType: 'no_match', reason: `Receiver "${person.map(t => t.w).join(' ')}" not on the receipt` };
       }
       unused.splice(unused.indexOf(found), 1);
     }
@@ -318,10 +353,13 @@ class NameIntelligenceService {
     if (near) {
       return { score: 80, matchType: 'person_near', reason: 'Names match except for a one-letter spelling difference' };
     }
+    if (usedInitial) {
+      return { score: 80, matchType: 'person_initials', reason: 'Names match on initials, needs the merchant to confirm' };
+    }
     if (unused.length > 0) {
       return { score: 80, matchType: 'person_subset', reason: 'Receipt lists more account holders than expected' };
     }
-    return { score: 92, matchType: 'person_match', reason: 'Every holder matches (initials allowed)' };
+    return { score: 92, matchType: 'person_match', reason: 'Every holder matches word for word' };
   }
 
   /**

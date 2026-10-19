@@ -66,20 +66,36 @@ describe('receiver name is the primary recipient check', () => {
     expect(result.verification.status).toBe('verified');
   });
 
-  test('an abbreviated receiver can verify at medium read quality without account or transaction id', async () => {
+  // An initial cannot tell CHAN KANHA from CHAN KOSAL. Founder decision
+  // (2026-10-19): initials auto-verify only when the receipt's account number
+  // matches exactly; otherwise the merchant confirms. Never a rejection.
+  test('an abbreviated receiver verifies when the account number matches exactly', async () => {
     const result = await run(
-      {
-        confidence: 'medium',
-        toAccount: null,
-        transactionId: null,
-        recipientName: 'CHAN K. & THOEURN T.'
-      },
+      { confidence: 'medium', transactionId: null, recipientName: 'CHAN K. & THOEURN T.' },
       { recipientNames: ['CHAN KANHA & THOEURN THAVRY'] }
     );
 
     expect(result.validation.recipientNames.match).toBe(true);
     expect(result.validation.recipientNames.confidence).toBeGreaterThanOrEqual(85);
     expect(result.verification.status).toBe('verified');
+  });
+
+  test('an abbreviated receiver without an account number goes to review, not rejected', async () => {
+    const result = await run(
+      { confidence: 'medium', toAccount: null, transactionId: null, recipientName: 'CHAN K. & THOEURN T.' },
+      { recipientNames: ['CHAN KANHA & THOEURN THAVRY'] }
+    );
+
+    expect(result.verification.status).toBe('pending');
+  });
+
+  test('an abbreviated receiver with a different account number is not verified', async () => {
+    const result = await run(
+      { recipientName: 'CHAN K. & THOEURN T.', toAccount: '011 999 888' },
+      { recipientNames: ['CHAN KANHA & THOEURN THAVRY'] }
+    );
+
+    expect(result.verification.status).not.toBe('verified');
   });
 
   test('wrong receiver is rejected even when the account number matches', async () => {
