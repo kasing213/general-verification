@@ -353,11 +353,13 @@ class NameIntelligenceService {
     if (near) {
       return { score: 80, matchType: 'person_near', reason: 'Names match except for a one-letter spelling difference' };
     }
-    if (usedInitial) {
-      return { score: 80, matchType: 'person_initials', reason: 'Names match on initials, needs the merchant to confirm' };
-    }
+    // Subset before initials: verification.js lets 'person_initials' through
+    // on an exact account match, and that must only mean "same holders".
     if (unused.length > 0) {
       return { score: 80, matchType: 'person_subset', reason: 'Receipt lists more account holders than expected' };
+    }
+    if (usedInitial) {
+      return { score: 80, matchType: 'person_initials', reason: 'Names match on initials, needs the merchant to confirm' };
     }
     return { score: 92, matchType: 'person_match', reason: 'Every holder matches word for word' };
   }

@@ -89,6 +89,15 @@ describe('receiver name is the primary recipient check', () => {
     expect(result.verification.status).toBe('pending');
   });
 
+  test('initials plus extra holders on the receipt go to review even with the account matching', async () => {
+    const result = await run(
+      { recipientName: 'CHAN K. & THOEURN T. & SOK D.' },
+      { recipientNames: ['CHAN KANHA & THOEURN THAVRY'] }
+    );
+
+    expect(result.verification.status).toBe('pending');
+  });
+
   test('an abbreviated receiver with a different account number is not verified', async () => {
     const result = await run(
       { recipientName: 'CHAN K. & THOEURN T.', toAccount: '011 999 888' },
