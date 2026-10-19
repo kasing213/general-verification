@@ -168,6 +168,39 @@ describe('request options', () => {
   });
 });
 
+describe('image media type', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+  const WEBP = Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 ', 'binary');
+
+  async function sentMediaTypes(input, options) {
+    mockAgents();
+    await load().extractWithClaude(input, options);
+    return mockCreate.mock.calls.map(([req]) => req.messages[0].content[0].source.media_type);
+  }
+
+  // A PNG labelled image/jpeg is a 400 on all 3 agents -> empty fields ->
+  // NOT_BANK_STATEMENT on a real receipt (staging, 2026-10-19).
+  test('a PNG buffer is sent as image/png', async () => {
+    expect(await sentMediaTypes(PNG)).toEqual(['image/png', 'image/png', 'image/png']);
+  });
+
+  test('a base64 PNG string is sent as image/png', async () => {
+    expect(await sentMediaTypes(PNG.toString('base64'))).toEqual(['image/png', 'image/png', 'image/png']);
+  });
+
+  test('JPEG and WEBP are detected from their bytes', async () => {
+    expect(await sentMediaTypes(JPEG)).toEqual(['image/jpeg', 'image/jpeg', 'image/jpeg']);
+    mockCreate.mockReset();
+    expect(await sentMediaTypes(WEBP)).toEqual(['image/webp', 'image/webp', 'image/webp']);
+  });
+
+  test('the bytes win over a wrong caller-supplied mediaType', async () => {
+    expect(await sentMediaTypes(PNG, { mediaType: 'image/jpeg' }))
+      .toEqual(['image/png', 'image/png', 'image/png']);
+  });
+});
+
 describe('response handling', () => {
   test('extractJson tolerates prose and stray braces around the JSON', () => {
     const { extractJson } = load()._internals;

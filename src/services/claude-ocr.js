@@ -342,6 +342,20 @@ async function callAgent(label, prompt, base64Image, mediaType) {
   return parsed;
 }
 
+/**
+ * Media type from the image's magic bytes. Claude 400s when the declared type
+ * does not match the bytes, and receipts arrive as PNG as often as JPEG, so
+ * the bytes decide; `fallback` is used only when they are not recognised.
+ */
+function detectMediaType(buffer, fallback = 'image/jpeg') {
+  if (buffer.length >= 8 && buffer.readUInt32BE(0) === 0x89504e47) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.length >= 12 && buffer.toString('latin1', 0, 4) === 'RIFF'
+      && buffer.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  if (buffer.length >= 6 && buffer.toString('latin1', 0, 4) === 'GIF8') return 'image/gif';
+  return fallback;
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /**
@@ -351,20 +365,23 @@ async function callAgent(label, prompt, base64Image, mediaType) {
  *
  * @param {Buffer|string} imageInput - Image bytes or base64-encoded string (no data: prefix)
  * @param {object} [options]
- * @param {string} [options.mediaType] - "image/jpeg" or "image/png" (default "image/jpeg")
+ * @param {string} [options.mediaType] - used only when the bytes are not a
+ *   recognised PNG/JPEG/WEBP/GIF (default "image/jpeg")
  * @returns {Promise<object>} - paymentData in the shape downstream expects
  */
 async function extractWithClaude(imageInput, options = {}) {
-  const mediaType = options.mediaType || 'image/jpeg';
-
   let base64Image;
+  let bytes;
   if (Buffer.isBuffer(imageInput)) {
+    bytes = imageInput;
     base64Image = imageInput.toString('base64');
   } else if (typeof imageInput === 'string') {
     base64Image = imageInput;
+    bytes = Buffer.from(imageInput.slice(0, 24), 'base64');
   } else {
     throw new Error('extractWithClaude: imageInput must be Buffer or base64 string');
   }
+  const mediaType = detectMediaType(bytes, options.mediaType || 'image/jpeg');
 
   const models = AGENT_LABELS.map(l => `${l}=${resolveModel(l)}`).join(' ');
   console.log(`🔍 [OCR-CLAUDE] Dispatching 3 agents (${models})`);
@@ -433,6 +450,7 @@ module.exports = {
   // exported for testing
   _internals: {
     callAgent,
+    detectMediaType,
     currencyFromEvidence,
     normalizeAmountResult,
     resolveModel,
