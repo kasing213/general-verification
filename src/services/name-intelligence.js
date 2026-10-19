@@ -105,6 +105,28 @@ class NameIntelligenceService {
     }
     steps.push('normalized_match_failed');
 
+    // Latin names are compared holder by holder and word by word. The
+    // whole-string steps below were both too strict (0% for "CHAN K. &
+    // THEOURN T." vs ABA's "CHAN KASING AND THOEURN THEARY") and too loose
+    // ("C. K." and "CHAM KASING" both passed for "CHAN KASING").
+    if (this.isLatin(extracted) && this.isLatin(expected)) {
+      const person = this.personMatch(extracted, expected);
+      if (person.score > 0) {
+        return this.createResult(person.score, person.matchType, person.reason, {
+          steps: [...steps, person.matchType]
+        });
+      }
+      steps.push('person_match_failed');
+      const aliasResult = await this.checkAliases(normalizedExtracted, normalizedExpected, allowedAliases);
+      if (aliasResult.score > 0) {
+        return this.createResult(aliasResult.score, 'alias_match', aliasResult.reason, {
+          steps: [...steps, 'alias_match'],
+          alias: aliasResult.alias
+        });
+      }
+      return this.createResult(0, 'no_match', person.reason, { steps: [...steps, 'alias_match_failed'] });
+    }
+
     // Step 3: OCR error correction
     if (this.config.enableOCRCorrection) {
       const correctedExtracted = this.applyOCRCorrections(normalizedExtracted);
@@ -201,6 +223,124 @@ class NameIntelligenceService {
       .replace(/[^\w\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  isLatin(text) {
+    return Boolean(text) && !/[ក-៿]/.test(text);
+  }
+
+  /**
+   * Account holders in a receiver name. Joint accounts print as
+   * "A AND B", "A & B", "A + B" or "A / B".
+   * @param {string} text - Raw name
+   * @returns {string[][]} - One token list per holder
+   */
+  splitPersons(text) {
+    return String(text)
+      .toUpperCase()
+      .split(/\s+AND\s+|[&+/,;]/)
+      .map(part => this.normalizeText(part).split(' ').filter(Boolean))
+      .filter(tokens => tokens.length > 0);
+  }
+
+  /**
+   * How two name words relate: 'exact' (incl. OCR look-alikes), 'initial'
+   * (K. for KASING), 'near' (one slipped or swapped letter in a word of 5+
+   * letters - romanised Khmer names are spelled many ways), or null.
+   */
+  tokenRelation(a, b) {
+    // Not applyOCRCorrections: its '.' key is a regex wildcard that turns
+    // every word into dots, so any two words would compare equal.
+    if (a === b || this.ocrCanonical(a) === this.ocrCanonical(b)) return 'exact';
+    if ((a.length <= 2 && b.length > 2 && b.startsWith(a)) ||
+        (b.length <= 2 && a.length > 2 && a.startsWith(b))) return 'initial';
+    if (Math.min(a.length, b.length) >= 5 && this.damerauDistance(a, b) === 1) return 'near';
+    return null;
+  }
+
+  /** Digits a reader mistakes for letters in a name word, mapped back. */
+  ocrCanonical(token) {
+    const map = { 0: 'O', 1: 'I', 2: 'Z', 5: 'S', 6: 'G', 8: 'B' };
+    return token.replace(/[012568]/g, ch => map[ch]);
+  }
+
+  /**
+   * One expected holder against one extracted holder, family/given name in
+   * either order. Needs at least one full word (not just initials).
+   * @returns {null|{near: boolean, exactWord: boolean}}
+   */
+  matchPerson(expectedTokens, extractedTokens) {
+    if (expectedTokens.length !== extractedTokens.length) return null;
+    const orders = [extractedTokens, [...extractedTokens].reverse()];
+    for (const candidate of orders) {
+      const relations = expectedTokens.map((t, i) => this.tokenRelation(t, candidate[i]));
+      if (relations.some(r => r === null)) continue;
+      const fullWords = relations.filter(r => r === 'exact' || r === 'near');
+      if (fullWords.length === 0) continue;
+      return { near: relations.includes('near'), exactWord: relations.includes('exact') };
+    }
+    return null;
+  }
+
+  /**
+   * Every expected holder must be on the receipt. Exact words and initials
+   * auto-verify; a one-letter slip, or extra holders on the receipt (the
+   * merchant's own joint account), go to the merchant instead.
+   * @returns {{score: number, matchType: string, reason: string}}
+   */
+  personMatch(extracted, expected) {
+    const expectedPersons = this.splitPersons(expected);
+    const extractedPersons = this.splitPersons(extracted);
+    const unused = extractedPersons.map((_, i) => i);
+    let near = false;
+    let exactWord = false;
+
+    for (const person of expectedPersons) {
+      let found = -1;
+      for (const idx of unused) {
+        const m = this.matchPerson(person, extractedPersons[idx]);
+        if (m) {
+          found = idx;
+          near = near || m.near;
+          exactWord = exactWord || m.exactWord;
+          break;
+        }
+      }
+      if (found === -1) {
+        return { score: 0, matchType: 'no_match', reason: `Receiver "${person.join(' ')}" not on the receipt` };
+      }
+      unused.splice(unused.indexOf(found), 1);
+    }
+
+    if (!exactWord) {
+      return { score: 0, matchType: 'no_match', reason: 'No name word matches exactly' };
+    }
+    if (near) {
+      return { score: 80, matchType: 'person_near', reason: 'Names match except for a one-letter spelling difference' };
+    }
+    if (unused.length > 0) {
+      return { score: 80, matchType: 'person_subset', reason: 'Receipt lists more account holders than expected' };
+    }
+    return { score: 92, matchType: 'person_match', reason: 'Every holder matches (initials allowed)' };
+  }
+
+  /**
+   * Optimal-string-alignment distance: Levenshtein plus adjacent swaps, so
+   * THEOURN / THOEURN is one edit, not two.
+   */
+  damerauDistance(a, b) {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 0; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+    }
+    return d[a.length][b.length];
   }
 
   /**
