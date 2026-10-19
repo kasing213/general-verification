@@ -287,6 +287,121 @@ async function logNameMatchAudit(extracted, expected, matchResult, options) {
 }
 
 /**
+ * Whose payment did a duplicate transactionId collide with? The unique index
+ * on transactionId is GLOBAL, not per-tenant, so the original can be another
+ * merchant's payment entirely.
+ *
+ * Details are attached ONLY for our own merchant. Handing back another
+ * tenant's invoice number or amount would leak it into this merchant's
+ * Telegram and dashboard.
+ *
+ * @param {object} existingPayment - The original payment record
+ * @param {string} merchantId - The merchant asking now
+ * @returns {{sameMerchant: boolean, duplicateOf: object}}
+ */
+function describeDuplicate(existingPayment, merchantId) {
+  const thisMerchant = merchantId ? String(merchantId) : null;
+  const thatMerchant = existingPayment.merchant_id
+    ? String(existingPayment.merchant_id) : null;
+  const sameMerchant = Boolean(thisMerchant && thatMerchant && thisMerchant === thatMerchant);
+
+  return {
+    sameMerchant,
+    duplicateOf: sameMerchant
+      ? {
+          scope: 'same_merchant',
+          record_id: String(existingPayment._id),
+          invoice_number: existingPayment.invoice_id || null,
+          amount: existingPayment.amount || null,
+          currency: existingPayment.currency || null,
+          transaction_date: existingPayment.transactionDate || null,
+          submitted_at: existingPayment.uploadedAt || null
+        }
+      : { scope: 'other_merchant' }
+  };
+}
+
+/**
+ * The verdict for a payment whose transactionId is already stored - the
+ * E11000 path, where the pre-check did not see the original (it skips
+ * rejected originals, and loses the race when two sends run at once).
+ *
+ * A duplicate must not get a different verdict than the original: the caller
+ * has usually already told the customer the first answer. So:
+ *  - original rejected (same merchant): the original's rejection, reason and
+ *    message, unchanged.
+ *  - original verified or pending (same merchant): what the pre-check gives -
+ *    held for the merchant as DUPLICATE_TRANSACTION. A verified original is
+ *    never verified a second time; that would credit one transfer twice.
+ *  - another merchant's, or the original could not be looked up: held,
+ *    detail-free (DUPLICATE_TRANSACTION_OTHER_ACCOUNT), as before.
+ *
+ * @param {object|null} existingPayment - The original, or null if not found
+ * @param {string} merchantId - The merchant asking now
+ * @returns {{scope: string, verification: object}}
+ */
+function duplicateTransactionVerdict(existingPayment, merchantId) {
+  if (!existingPayment) {
+    return {
+      scope: 'unknown',
+      verification: {
+        status: 'pending',
+        paymentLabel: 'PENDING',
+        rejectionReason: FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT,
+        userMessage: USER_MESSAGES.DUPLICATE_TRANSACTION,
+        duplicateOf: { scope: 'other_merchant' },
+        originalStatus: null
+      }
+    };
+  }
+
+  const { sameMerchant, duplicateOf } = describeDuplicate(existingPayment, merchantId);
+
+  if (!sameMerchant) {
+    return {
+      scope: 'other_merchant',
+      verification: {
+        status: 'pending',
+        paymentLabel: 'PENDING',
+        rejectionReason: FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT,
+        userMessage: USER_MESSAGES.DUPLICATE_TRANSACTION,
+        duplicateOf,
+        originalStatus: null
+      }
+    };
+  }
+
+  if (existingPayment.verificationStatus === 'rejected') {
+    const reason = existingPayment.rejectionReason || null;
+    return {
+      scope: 'same_merchant',
+      verification: {
+        status: 'rejected',
+        paymentLabel: existingPayment.paymentLabel || 'UNPAID',
+        rejectionReason: reason,
+        // Records stored before userMessage was persisted fall back to the
+        // message the reason maps to.
+        userMessage: existingPayment.userMessage || USER_MESSAGES[reason] || null,
+        duplicateOf,
+        originalStatus: 'rejected'
+      }
+    };
+  }
+
+  return {
+    scope: 'same_merchant',
+    verification: {
+      status: 'pending',
+      paymentLabel: 'PENDING',
+      rejectionReason: FRAUD_TYPES.DUPLICATE_TRANSACTION,
+      userMessage: USER_MESSAGES.DUPLICATE_TRANSACTION,
+      duplicateOf,
+      originalStatus: existingPayment.verificationStatus || null
+    }
+  };
+}
+
+/**
  * Runs the 3-stage verification pipeline
  * @param {string|Buffer} imageInput - Image path or buffer
  * @param {object} expectedPayment - Expected payment details
@@ -388,10 +503,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
         // transactionId is GLOBAL, not per-tenant, so a hit can point at
         // another merchant's payment entirely. The two cases mean opposite
         // things and are handled differently on purpose.
-        const thisMerchant = options.merchantId ? String(options.merchantId) : null;
-        const thatMerchant = existingPayment.merchant_id
-          ? String(existingPayment.merchant_id) : null;
-        const sameMerchant = Boolean(thisMerchant && thatMerchant && thisMerchant === thatMerchant);
+        const { sameMerchant, duplicateOf } = describeDuplicate(existingPayment, options.merchantId);
 
         // A duplicate is no longer an auto-rejection. The merchant decides,
         // because the innocent explanations (customer resent the screenshot,
@@ -405,20 +517,9 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
           : FRAUD_TYPES.DUPLICATE_TRANSACTION_OTHER_ACCOUNT;
         result.verification.userMessage = USER_MESSAGES.DUPLICATE_TRANSACTION;
 
-        // Details are attached ONLY for our own merchant. Handing back another
-        // tenant's invoice number or amount would leak it into this
-        // merchant's Telegram and dashboard.
-        result.verification.duplicateOf = sameMerchant
-          ? {
-              scope: 'same_merchant',
-              record_id: String(existingPayment._id),
-              invoice_number: existingPayment.invoice_id || null,
-              amount: existingPayment.amount || null,
-              currency: existingPayment.currency || null,
-              transaction_date: existingPayment.transactionDate || null,
-              submitted_at: existingPayment.uploadedAt || null
-            }
-          : { scope: 'other_merchant' };
+        result.verification.duplicateOf = duplicateOf;
+        result.verification.originalStatus = sameMerchant
+          ? (existingPayment.verificationStatus || null) : null;
 
         // Still recorded as a fraud alert either way - the audit trail must
         // not get thinner just because the verdict got kinder. Severity now
@@ -710,6 +811,9 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 module.exports = {
   verifyPayment,
   verifyRecipient,
+  describeDuplicate,
+  duplicateTransactionVerdict,
+  USER_MESSAGES,
   normalizeAmount,
   normalizeAccount
 };

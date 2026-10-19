@@ -136,12 +136,29 @@ Runs BEFORE Stage 1. Checks `payments.findByTransactionId()` in MongoDB:
 - If existing payment found (status != rejected) → REJECTED / DUPLICATE_TRANSACTION + fraud alert
 - Wrapped in try/catch — DB failure degrades gracefully (skips check, proceeds with verification)
 
-### E11000 Race Condition Handler (`src/routes/verify.js`)
+### Read Each Image Once (`src/services/image-dedupe.js`, `src/routes/verify.js`)
 
-MongoDB has a unique sparse index on `payments.transactionId`. If two identical screenshots are processed simultaneously:
-1. First insert succeeds
-2. Second insert hits E11000 duplicate key error
-3. Handler: sets rejection status, re-inserts without transactionId for audit trail
+Before any OCR call the route hashes the image bytes (sha256 → `imageHash`) and
+scopes the hash to merchant + invoice + expected payment (`imageKey`). The same
+key within `IMAGE_DEDUPE_WINDOW_HOURS` (default 24, 0 = off) is answered from
+the first send's stored response (`responseSnapshot` on the payment record) with
+no Claude call and no new payment row. A send arriving while the first is still
+running waits for it (in-process map, per instance). Replies are flagged
+`duplicate: true`, `duplicateOf: <original record_id>`, `duplicateReason: 'SAME_IMAGE'`.
+A verified original is never re-issued as verified (double-credit): the resend
+gets `pending` / `DUPLICATE_TRANSACTION` with `verification.originalStatus: 'verified'`.
+
+### E11000 Duplicate Handler (`src/routes/verify.js`)
+
+MongoDB has a unique sparse index on `payments.transactionId`. The insert collides
+when the pre-check did not see the original (it skips rejected originals, or two
+sends of the same transaction ran at once). The handler looks the original up
+(`duplicateTransactionVerdict` in verification.js) and answers with:
+- same merchant, original rejected → the original's status, rejectionReason and userMessage
+- same merchant, original verified/pending → pending / DUPLICATE_TRANSACTION (same as the pre-check)
+- other merchant, or lookup failed (`scope=unknown` in the log) → pending / DUPLICATE_TRANSACTION_OTHER_ACCOUNT, no details
+Then re-inserts without transactionId for the audit trail. Response carries
+`duplicate: true`, `duplicateReason: 'SAME_TRANSACTION'`, `duplicateOf` (id, same merchant only).
 
 ### Fraud Alert Types
 
@@ -175,6 +192,7 @@ notifications   - Merchant notifications
 // Key indexes
 payments: { transactionId: 1 } (unique, sparse)  // Duplicate detection
 payments: { invoice_id: 1 }, { customer_id: 1 }, { merchant_id: 1 }
+payments: { imageKey: 1, uploadedAt: 1 } (partial: imageKey exists)  // Read-once lookup
 fraudAlerts: { alertId: 1 } (unique), { payment_id: 1 }
 
 // GridFS bucket: 'screenshots' (shared or main DB)
@@ -246,6 +264,7 @@ TESSERACT_CONFIDENCE_THRESHOLD - Min Tesseract confidence (default: 70)
 # Verification Config
 PAYMENT_TOLERANCE_PERCENT   - Amount match tolerance (default: 5%)
 MAX_SCREENSHOT_AGE_DAYS     - Old screenshot threshold (default: 7)
+IMAGE_DEDUPE_WINDOW_HOURS   - Reuse the result for a resent identical image (default: 24, 0 = off)
 
 # Name Intelligence
 NAME_MATCH_STRICT_THRESHOLD - Auto-approve threshold (default: 85)

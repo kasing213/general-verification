@@ -103,6 +103,11 @@ async function createIndexes() {
       paymentsCollection.createIndex({ transactionId: 1 }, { unique: true, sparse: true }),
       paymentsCollection.createIndex({ verificationStatus: 1 }),
       paymentsCollection.createIndex({ uploadedAt: -1 }),
+      // Read-once lookup: same image + tenant + expected payment within the window
+      paymentsCollection.createIndex(
+        { imageKey: 1, uploadedAt: 1 },
+        { partialFilterExpression: { imageKey: { $exists: true } } }
+      ),
 
       // Fraud alerts indexes
       fraudAlertsCollection.createIndex({ alertId: 1 }, { unique: true }),
@@ -214,6 +219,8 @@ const payments = {
   // merchant ("already used on INV-0031, 20,000 KHR, 12 Sep"). It used to
   // return only {_id, verificationStatus, merchant_id}, so a duplicate could
   // be detected but never explained. Same indexed lookup, no extra query.
+  // The verdict fields let a duplicate be answered with the original's
+  // verdict instead of a fresh one.
   async findByTransactionId(transactionId) {
     return paymentsCollection.findOne(
       { transactionId },
@@ -221,9 +228,19 @@ const payments = {
         projection: {
           _id: 1, verificationStatus: 1, merchant_id: 1,
           invoice_id: 1, amount: 1, currency: 1,
-          transactionDate: 1, uploadedAt: 1
+          transactionDate: 1, uploadedAt: 1,
+          paymentLabel: 1, rejectionReason: 1, userMessage: 1
         }
       }
+    );
+  },
+
+  // The first stored result for this image (see services/image-dedupe.js)
+  // uploaded at or after `since`.
+  async findRecentByImageKey(imageKey, since) {
+    return paymentsCollection.findOne(
+      { imageKey, uploadedAt: { $gte: since }, responseSnapshot: { $exists: true } },
+      { sort: { uploadedAt: 1 }, projection: { _id: 1, uploadedAt: 1, responseSnapshot: 1 } }
     );
   },
 
