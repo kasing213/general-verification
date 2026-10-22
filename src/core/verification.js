@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { convertToKHR, verifyAmount } = require('../utils/currency');
+const { banksMatch } = require('../utils/bank-name');
 const { validateTransactionDate, createFraudAlertRecord, determineSeverity } = require('./fraud-detector');
 const { analyzePaymentScreenshot } = require('./ocr-engine');
 const NameIntelligenceService = require('../services/name-intelligence');
@@ -720,7 +721,7 @@ async function verifyPayment(imageInput, expectedPayment, options = {}) {
 
   // 3c: Bank verification (if required)
   if (expected.bank && ocrResult.bankName) {
-    const bankMatch = ocrResult.bankName.toLowerCase().includes(expected.bank.toLowerCase());
+    const bankMatch = banksMatch(expected.bank, ocrResult.bankName);
     result.validation.bank.match = bankMatch;
     result.validation.bank.skipped = false;
     // Note: We don't reject on bank mismatch, just record it
