@@ -74,12 +74,14 @@ const MONTH_LOOKUP = {
   // ── October (10) ──
   '\u178F\u17BB\u179B\u17B6': 10,                  // org org org org (full)
   '\u178F\u17BB\u179B': 10,                         // org org org (short)
+  'ត.ល': 10,                               // dotted abbreviation the ABA app prints
   'October': 10, 'october': 10, 'Oct': 10, 'oct': 10, 'OCT': 10, 'OCTOBER': 10,
 
   // ── November (11) ──
   '\u179C\u17B7\u1785\u17D2\u1786\u17B7\u1780\u17B6': 11, // org org org org org org org org (full)
   '\u179C\u17B7\u1785\u17D2\u1786\u17B7\u1780': 11,       // org org org org org org org (short)
   '\u179C\u17B7\u1785': 11,                                 // org org org (skeleton)
+  'វិ.ច': 11,                         // dotted abbreviation the ABA app prints (2026-11)
   'November': 11, 'november': 11, 'Nov': 11, 'nov': 11, 'NOV': 11, 'NOVEMBER': 11,
 
   // ── December (12) ──

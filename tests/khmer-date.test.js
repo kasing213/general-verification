@@ -103,4 +103,19 @@ const inBankTz = (d) => new Date(d.getTime() + BANK_OFFSET_MS);
     expect(b.getUTCMonth()).toBe(3); // 04 = April, day/month not swapped
     expect(b.getUTCDate()).toBe(18);
   });
+
+  // ABA's Khmer-language app prints a dotted month abbreviation. Without these
+  // every November receipt read as "no date" and was held (2026-11-10).
+  test('parses the dotted November abbreviation the ABA app prints', () => {
+    const b = inBankTz(parseKhmerDate('វិ.ច 01, 2026'));
+    expect(b.getUTCFullYear()).toBe(2026);
+    expect(b.getUTCMonth()).toBe(10); // November
+    expect(b.getUTCDate()).toBe(1);
+  });
+
+  test('parses the dotted October abbreviation', () => {
+    const b = inBankTz(parseKhmerDate('ត.ល 25, 2026'));
+    expect(b.getUTCMonth()).toBe(9); // October
+    expect(b.getUTCDate()).toBe(25);
+  });
 });
