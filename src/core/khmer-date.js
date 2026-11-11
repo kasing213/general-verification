@@ -87,6 +87,7 @@ const MONTH_LOOKUP = {
   // ── December (12) ──
   '\u1792\u17D2\u1793\u17BC': 12,                  // org org org org (full)
   '\u1792\u17D2\u1793': 12,                         // org org org (short)
+  '\u1792.\u1793': 12,                          // dotted abbreviation, same pattern as \u179C\u17B7.\u1785 / \u178F.\u179B (not yet seen on a real receipt)
   'December': 12, 'december': 12, 'Dec': 12, 'dec': 12, 'DEC': 12, 'DECEMBER': 12,
 };
 

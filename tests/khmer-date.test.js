@@ -118,4 +118,10 @@ const inBankTz = (d) => new Date(d.getTime() + BANK_OFFSET_MS);
     expect(b.getUTCMonth()).toBe(9); // October
     expect(b.getUTCDate()).toBe(25);
   });
+
+  test('parses the dotted December abbreviation', () => {
+    const b = inBankTz(parseKhmerDate('ធ.ន 05, 2026'));
+    expect(b.getUTCMonth()).toBe(11); // December
+    expect(b.getUTCDate()).toBe(5);
+  });
 });
