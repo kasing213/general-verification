@@ -74,23 +74,47 @@ const MONTH_LOOKUP = {
   // ── October (10) ──
   '\u178F\u17BB\u179B\u17B6': 10,                  // org org org org (full)
   '\u178F\u17BB\u179B': 10,                         // org org org (short)
+  'ត.ល': 10,                               // dotted abbreviation the ABA app prints
   'October': 10, 'october': 10, 'Oct': 10, 'oct': 10, 'OCT': 10, 'OCTOBER': 10,
 
   // ── November (11) ──
   '\u179C\u17B7\u1785\u17D2\u1786\u17B7\u1780\u17B6': 11, // org org org org org org org org (full)
   '\u179C\u17B7\u1785\u17D2\u1786\u17B7\u1780': 11,       // org org org org org org org (short)
   '\u179C\u17B7\u1785': 11,                                 // org org org (skeleton)
+  'វិ.ច': 11,                         // dotted abbreviation the ABA app prints (2026-11)
   'November': 11, 'november': 11, 'Nov': 11, 'nov': 11, 'NOV': 11, 'NOVEMBER': 11,
 
   // ── December (12) ──
   '\u1792\u17D2\u1793\u17BC': 12,                  // org org org org (full)
   '\u1792\u17D2\u1793': 12,                         // org org org (short)
+  '\u1792.\u1793': 12,                          // dotted abbreviation, same pattern as \u179C\u17B7.\u1785 / \u178F.\u179B (not yet seen on a real receipt)
   'December': 12, 'december': 12, 'Dec': 12, 'dec': 12, 'DEC': 12, 'DECEMBER': 12,
 };
 
 // Pre-sort keys by length descending so longest match wins
 const MONTH_KEYS_SORTED = Object.keys(MONTH_LOOKUP)
   .sort((a, b) => b.length - a.length);
+
+// ABA's Khmer app prints the month as a dotted abbreviation: its first two
+// consonants with a dot between (វិ.ច, ត.ល ...). Whether a vowel is kept
+// varies (វិ.ច keeps it, ត.ល drops it), so match on the consonants only.
+// The 12 consonant pairs are all different.
+const DOTTED_MONTH = {
+  'មក': 1,  // ម.ក  មករា
+  'កម': 2,  // ក.ម  កុម្ភៈ
+  'មន': 3,  // ម.ន  មីនា
+  'មស': 4,  // ម.ស  មេសា
+  'ឧស': 5,  // ឧ.ស  ឧសភា
+  'មថ': 6,  // ម.ថ  មិថុនា
+  'កក': 7,  // ក.ក  កក្កដា
+  'សហ': 8,  // ស.ហ  សីហា
+  'កញ': 9,  // ក.ញ  កញ្ញា
+  'តល': 10, // ត.ល  តុលា
+  'វច': 11, // វ.ច  វិច្ឆិកា
+  'ធន': 12, // ធ.ន  ធ្នូ
+};
+// consonant or independent vowel, optional vowel signs, dot, consonant
+const DOTTED_RE = /([ក-ឳ])[឴-៑៓]*\s*\.\s*([ក-អ])/;
 
 // Regex that matches a sequence of digits in EITHER Arabic (0-9) or Khmer (០-៉)
 const DIGIT_PATTERN = /[\d\u17E0-\u17E9]+/g;
@@ -132,6 +156,11 @@ function extractNumbers(str) {
  */
 function findMonth(text) {
   if (!text) return null;
+
+  const dotted = DOTTED_RE.exec(text);
+  if (dotted && DOTTED_MONTH[dotted[1] + dotted[2]]) {
+    return { month: DOTTED_MONTH[dotted[1] + dotted[2]], match: dotted[0], index: dotted.index };
+  }
 
   for (const key of MONTH_KEYS_SORTED) {
     const idx = text.indexOf(key);
@@ -213,6 +242,13 @@ function extractDayYear(text, monthIdx, matchLen) {
     [day, year] = [year, day];
   }
   if (year < 100) year += 2000;
+  // 12-hour clock: "12:30 AM" was read as 12:30 noon, 12 hours in the future,
+  // so a payment just after midnight was held as a future date.
+  const ampm = /\b(AM|PM)\b/i.exec(afterMonth);
+  if (ampm && hour >= 1 && hour <= 12) {
+    if (ampm[1].toUpperCase() === 'PM' && hour < 12) hour += 12;
+    if (ampm[1].toUpperCase() === 'AM' && hour === 12) hour = 0;
+  }
   if (hour > 23) hour = 0;
   if (minute > 59) minute = 0;
 

@@ -103,4 +103,41 @@ const inBankTz = (d) => new Date(d.getTime() + BANK_OFFSET_MS);
     expect(b.getUTCMonth()).toBe(3); // 04 = April, day/month not swapped
     expect(b.getUTCDate()).toBe(18);
   });
+
+  // ABA's Khmer-language app prints a dotted month abbreviation. Without these
+  // every November receipt read as "no date" and was held (2026-11-10).
+  test('parses the dotted November abbreviation the ABA app prints', () => {
+    const b = inBankTz(parseKhmerDate('វិ.ច 01, 2026'));
+    expect(b.getUTCFullYear()).toBe(2026);
+    expect(b.getUTCMonth()).toBe(10); // November
+    expect(b.getUTCDate()).toBe(1);
+  });
+
+  test('parses the dotted October abbreviation', () => {
+    const b = inBankTz(parseKhmerDate('ត.ល 25, 2026'));
+    expect(b.getUTCMonth()).toBe(9); // October
+    expect(b.getUTCDate()).toBe(25);
+  });
+
+  // Every month, with and without the vowel, Arabic and Khmer digits: only
+  // the three typed-in strings parsed before (2026-11-11).
+  const DOTTED = [
+    ['ម.ក', 'ម.ក'], ['ក.ម', 'កុ.ម'], ['ម.ន', 'មី.ន'], ['ម.ស', 'មេ.ស'],
+    ['ឧ.ស', 'ឧ.ស'], ['ម.ថ', 'មិ.ថ'], ['ក.ក', 'ក.ក'], ['ស.ហ', 'សី.ហ'],
+    ['ក.ញ', 'ក.ញ'], ['ត.ល', 'តុ.ល'], ['វ.ច', 'វិ.ច'], ['ធ.ន', 'ធ.ន'],
+  ];
+  test.each(DOTTED.map((forms, i) => [i, ...forms]))(
+    'parses dotted month %i (%s / %s)', (i, bare, withVowel) => {
+      for (const s of [`${bare} 05, 2026`, `${withVowel} 05, 2026 02:04 PM`, `០៥ ${withVowel} ២០២៦`]) {
+        const b = inBankTz(parseKhmerDate(s));
+        expect([s, b.getUTCMonth(), b.getUTCDate()]).toEqual([s, i, 5]);
+      }
+    });
+
+  test('reads AM/PM after a Khmer month', () => {
+    expect(inBankTz(parseKhmerDate('វិ.ច 05, 2026 02:04 PM')).getUTCHours()).toBe(14);
+    expect(inBankTz(parseKhmerDate('វិ.ច 05, 2026 12:30 AM')).getUTCHours()).toBe(0);
+    expect(inBankTz(parseKhmerDate('05 វិច្ឆិកា 2026 12:15 PM')).getUTCHours()).toBe(12);
+    expect(inBankTz(parseKhmerDate('០៥ វិច្ឆិកា ២០២៦ ១៤:០៤')).getUTCHours()).toBe(14);
+  });
 });
